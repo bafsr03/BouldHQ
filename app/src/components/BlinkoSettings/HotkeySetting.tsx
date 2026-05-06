@@ -423,7 +423,7 @@ export const HotkeySetting = observer(() => {
             leftContent={
               <ItemWithTooltip
                 content="Autostart"
-                toolTipContent="Start Blinko automatically on system boot"
+                toolTipContent="Start BouldHQ automatically on system boot"
               />
             }
             rightContent={

@@ -187,7 +187,7 @@ export const requestMicrophonePermission = async (): Promise<boolean> => {
                 } catch (error) {
                     console.error('Failed to open app settings:', error);
                     // Fallback: Show instructions
-                    alert('Please go to Settings > Apps > Blinko > Permissions and enable Microphone access.');
+                    alert('Please go to Settings > Apps > BouldHQ > Permissions and enable Microphone access.');
                 }
             }
         } else if (currentPlatform === 'macos') {

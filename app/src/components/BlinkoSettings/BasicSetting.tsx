@@ -27,7 +27,7 @@ import { getBlinkoEndpoint } from "@/lib/blinkoEndpoint";
 
 export const BasicSetting = observer(() => {
   const user = RootStore.Get(UserStore)
-  const CODE = `curl -X 'POST' '${getBlinkoEndpoint() ?? window.location.origin}api/v1/note/upsert' \\\n      -H 'Content-Type: application/json' \\\n      -H 'Authorization: Bearer ${user.userInfo.value?.token}' \\\n      -d '{ "content": "🎉Hello,Blinko! --send from api ", "type":0 }'\n`
+  const CODE = `curl -X 'POST' '${getBlinkoEndpoint() ?? window.location.origin}api/v1/note/upsert' \\\n      -H 'Content-Type: application/json' \\\n      -H 'Authorization: Bearer ${user.userInfo.value?.token}' \\\n      -d '{ "content": "🎉Hello,BouldHQ! --send from api", "type":0 }'\n`
   const CODE_SNIPPET = `\`\`\`javascript\n //blinko api document:${getBlinkoEndpoint() ?? window.location.origin}/api-doc\n ${CODE} \`\`\``
   const { t } = useTranslation()
   const blinko = RootStore.Get(BlinkoStore)
@@ -110,7 +110,7 @@ export const BasicSetting = observer(() => {
                     className="w-10 h-10 rounded-full object-cover cursor-pointer hover:opacity-80 transition-opacity"
                   />
                 ) : (
-                  <Image src="/logo.png" width={30} />
+                  <Image src="/logo.svg" width={30} />
                 )}
               </UploadFileWrapper>
             </div>

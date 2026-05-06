@@ -8,8 +8,8 @@ export const FallbackImage = ({ src, alt, className, ...props }: ImageProps) => 
     };
 
     if (error) {
-        return <Image src={'/logo.png'} alt={alt} className={className} {...props} onError={handleError}  />;
+        return <Image src={'/logo.svg'} alt={alt} className={className} {...props} onError={handleError}  />;
     }
 
-    return <Image src={src} alt={alt} className={className} {...props} onError={handleError} fallbackSrc="/logo.png" />;
+    return <Image src={src} alt={alt} className={className} {...props} onError={handleError} fallbackSrc="/logo.svg" />;
 }

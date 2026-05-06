@@ -79,7 +79,7 @@ export default observer(function AiSetting() {
       <CollapsibleCard icon="hugeicons:api" title="MCP Integration">
         <div className="space-y-4">
           <div className="text-sm text-default-600 mb-4">
-            {t('mcp-integration-desc', 'Model Context Protocol (MCP) integration allows AI assistants to connect to Blinko and use its tools.')}
+            {t('mcp-integration-desc', 'Model Context Protocol (MCP) integration allows AI assistants to connect to BouldHQ and use its tools.')}
           </div>
 
           <div className="space-y-3">

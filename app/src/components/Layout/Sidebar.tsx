@@ -105,7 +105,9 @@ export const Sidebar = observer(({ onItemClick }: SidebarProps) => {
                 }}
                 className={`flex items-center gap-1 group ${SideBarItem} ${base.isSideBarActive(routerInfo, i) ? '!bg-primary  !text-primary-foreground' : ''}`}
               >
-                <Icon className={`${base.isSidebarCollapsed ? 'mx-auto' : ''}`} icon={i.icon} width="20" height="20" />
+                {(i as any).img
+                  ? <img src={(i as any).img} alt={i.title} width={20} height={20} className={`${base.isSidebarCollapsed ? 'mx-auto' : ''} transition-all duration-300 ${base.isSideBarActive(routerInfo, i) ? 'invert dark:invert-0' : 'dark:invert'}`} />
+                  : <Icon className={`${base.isSidebarCollapsed ? 'mx-auto' : ''}`} icon={i.icon} width="20" height="20" />}
                 {!base.isSidebarCollapsed && <span className="!transition-all">{t(i.title)}</span>}
               </Link>
             ))}

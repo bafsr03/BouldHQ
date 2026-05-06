@@ -78,7 +78,9 @@ export const MobileNavBar = observer(({ onItemClick }: MobileNavBarProps) => {
               whileHover={{ scale: 1.1 }}
               transition={{ type: "spring", stiffness: 400, damping: 17 }}
             >
-              <Icon className={`text-center`} icon={i.icon} width="24" height="24" />
+              {(i as any).img
+                ? <img src={(i as any).img} alt={i.title} width={24} height={24} className={`transition-all duration-300 ${base.isSideBarActive(routerInfo, i) ? 'invert dark:invert-0' : 'dark:invert'}`} />
+                : <Icon className={`text-center`} icon={i.icon} width="24" height="24" />}
             </motion.div>
           </Link>
         </motion.div>

@@ -20,8 +20,8 @@ export const AIExtend: IHintExtend[] = [{
   key: '@',
   hint() {
     return [{
-      html: `<span class="blinko-tag-hint">Blinko AI</span>`,
-      value: `@Blinko AI&nbsp;`
+      html: `<span class="blinko-tag-hint">BouldHQ AI</span>`,
+      value: `@BouldHQ AI&nbsp;`
     }]
   }
 }]

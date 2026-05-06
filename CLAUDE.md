@@ -8,140 +8,139 @@ Blinko is an open-source, self-hosted note-taking application with AI-powered fe
 
 ## Tech Stack
 
-- **Frontend**: React 18, TypeScript, Vite, TailwindCSS, Tauri (for desktop apps)
-- **Backend**: Node.js, Express, tRPC, Prisma ORM
-- **Database**: PostgreSQL
+- **Frontend**: React 18, TypeScript, Vite, TailwindCSS v4, Tauri 2 (desktop/mobile)
+- **Backend**: Node.js, Express 5, tRPC v11, Prisma ORM, Mastra (agent framework)
+- **Database**: PostgreSQL + LibSQL (vector store for embeddings)
 - **Package Manager**: Bun (v1.2.8+)
-- **Build Tool**: Turbo (monorepo management)
-- **AI**: Multiple AI providers (OpenAI, Anthropic, Google, Azure, Ollama, etc.)
+- **Build Tool**: Turbo (monorepo)
+- **AI**: Vercel AI SDK adapters for OpenAI, Anthropic, Google, Azure, DeepSeek, xAI, Ollama, OpenRouter
 
-## Project Structure
+## Monorepo Structure
 
 ```
 blinko/
-├── app/                    # Frontend React application
-│   ├── src/               # React source code
-│   ├── src-tauri/         # Tauri desktop app configuration
-│   └── tauri-plugin-blinko/ # Custom Tauri plugin
-├── server/                 # Backend Node.js server
-│   ├── aiServer/          # AI integration services
-│   ├── routerTrpc/        # tRPC API routes
-│   └── routerExpress/     # Express API routes
-├── prisma/                # Database schema and migrations
-├── shared/                # Shared utilities and types
-└── blinko-types/         # Type definitions
+├── app/                    # @blinko/frontend — React + Vite + Tauri
+│   └── src/
+│       ├── store/         # MobX stores (state management)
+│       ├── pages/         # Route-level components
+│       └── components/    # UI components
+├── server/                 # @blinko/backend — Express + tRPC
+│   ├── aiServer/          # AI services (AiService, AiModelFactory, providers, tools)
+│   ├── routerTrpc/        # tRPC routers (one file per domain)
+│   ├── routerExpress/     # Express routes (auth, file ops, RSS, OpenAI compat, MCP)
+│   ├── jobs/              # pg-boss background jobs
+│   ├── lib/               # Shared server utilities
+│   ├── middleware/        # tRPC middleware (auth, admin, demo guards)
+│   └── index.ts           # Server entry point
+├── prisma/                # Schema, migrations, seed
+├── shared/                # Shared types and utilities
+└── blinko-types/         # Exported type definitions
 ```
 
-## Common Development Commands
+## Development Commands
 
-### Setup & Installation
 ```bash
-bun install                # Install dependencies
-bun run prisma:generate    # Generate Prisma client
-bun run prisma:migrate:dev # Run database migrations
+bun install                # Install all workspace dependencies (runs prisma:generate via postinstall)
+bun run dev:backend        # Run backend only with hot reload (bun --watch, uses .env)
+bun run dev:frontend       # Run frontend dev server (ViteExpress integration, same as backend)
+bun run dev                # Run Tauri desktop app (requires Rust toolchain)
 ```
 
-### Development
-```bash
-bun run dev                # Run Tauri desktop app in development
-bun run dev:backend        # Run backend server only
-bun run dev:frontend       # Run frontend only
-bun run prisma:studio      # Open Prisma Studio for database management
-```
+The frontend and backend share **port 1111** — ViteExpress serves the Vite dev server through the Express app. `dev:frontend` actually runs the backend (`cd ../server && bun run dev`).
 
 ### Building
 ```bash
-bun run build:web          # Build web application
-bun run tauri:desktop:build # Build desktop application
-bun run tauri:android:build # Build Android application
+bun run build:web          # Build full web app (Turbo: frontend → backend)
+bun run start:server:production  # Copy built assets and start production server
 ```
 
 ### Database
 ```bash
-bun run prisma:migrate:deploy # Deploy migrations to production
-bun run seed               # Seed database with initial data
+bun run prisma:generate    # Generate Prisma client (auto-runs on install)
+bun run prisma:migrate:dev # Create and apply a new migration
+bun run prisma:migrate:deploy # Apply migrations (production)
+bun run prisma:studio      # Open Prisma Studio GUI
+bun run seed               # Seed the database
 ```
 
-### Testing & Linting
+### Testing
 ```bash
-bun run test               # Run tests (if configured)
+bun run test               # Run all tests via Turbo
 ```
 
-## Architecture & Key Components
+Tests live in `server/__tests__/unit/` and `server/__tests__/integration/`. To run a single test file:
+```bash
+cd server && bun test __tests__/unit/lib/sanitizeUploadFileName.test.ts
+```
 
-### Frontend Architecture
-- **State Management**: MobX with custom stores in `/app/src/store/`
-- **Routing**: React Router v7
-- **UI Components**: Custom components with HeroUI (@heroui/react)
-- **Editor**: Vditor for markdown editing
-- **Internationalization**: i18next with multiple language support
-- **API Communication**: tRPC client for type-safe API calls
+## Architecture
 
-### Backend Architecture
-- **API Layer**: Hybrid approach using both tRPC (type-safe) and Express routes
-- **Authentication**: Multiple providers (local, OAuth via passport)
-- **File Storage**: Local filesystem or S3-compatible storage
-- **AI Integration**: Factory pattern for multiple AI providers
-- **Background Jobs**: Cron-based scheduled tasks in `/server/jobs/`
-- **Embeddings**: RAG (Retrieval-Augmented Generation) support with @mastra/rag
+### Server Startup (`server/index.ts`)
+The server bootstraps Express, mounts all routes, initializes pg-boss scheduled jobs, then binds ViteExpress. Key routes:
+- `/api/trpc` — tRPC endpoint
+- `/api/auth` — Auth routes (passport)
+- `/api/file`, `/api/s3file` — File upload/download/delete
+- `/api/rss` — RSS feeds
+- `/v1` — OpenAI-compatible API
+- `/` (MCP) — Model Context Protocol handler
+- `/api-doc` — Swagger UI
+- `/api/openapi.json` — OpenAPI spec
+- `/health` — Health check
 
-### Database Schema
-- **Main Entities**: accounts, notes, attachments, tags, comments, conversations
-- **ORM**: Prisma with PostgreSQL
-- **Migrations**: Managed through Prisma migrate
+### tRPC (`server/routerTrpc/`)
+Root router in `_app.ts` composes domain routers: `notes`, `tags`, `users`, `attachments`, `config`, `ai`, `task`, `aiTask`, `analytics`, `comments`, `follows`, `notifications`, `plugin`, `conversation`, `message`, `mcpServers`, `fonts`.
+
+Middleware in `server/middleware/index.ts`:
+- `publicProcedure` — unauthenticated
+- `authProcedure` — requires JWT, checks token permissions against the procedure path
+- `superAdminAuthMiddleware` — requires `role === 'superadmin'`
+- `demoAuthMiddleware` — blocks mutations when `IS_DEMO=true`
+
+Context (`server/context.ts`) extracts a JWT from each request and injects `{ id, name, role, sub, permissions, ... }`.
+
+### AI Architecture (`server/aiServer/`)
+- **`AiModelFactory`** — resolves the active AI provider, creates Mastra agents (`BaseChatAgent`, `CommentAgent`, `TagAgent`), manages vector queries and LibSQL vector store
+- **`AiService`** — high-level AI operations: embedding upsert/delete, RAG completions, audio transcription, note post-processing
+- **Providers**: `LLMProvider`, `EmbeddingProvider`, `AudioProvider` wrap Vercel AI SDK models
+- **Tools** (Mastra tool format): `upsertBlinkoTool`, `updateBlinkoTool`, `deleteBlinkoTool`, `searchBlinkoTool`, `createCommentTool`, `webSearchTool`, `webExtra`, scheduled task tools
+- **Vector storage**: LibSQLVector (`@mastra/libsql`) with index named `'blinko'`
+- **RAG**: `@mastra/rag` MDocument chunking + `embedMany` from Vercel AI SDK
+
+### Background Jobs (`server/jobs/`)
+All jobs use pg-boss (`server/lib/pgBoss.ts`). Jobs extend `BaseScheduleJob` and expose `initialize()` + static trigger methods:
+- `ArchiveJob` — auto-archive old notes
+- `DBJob` — database backup
+- `RebuildEmbeddingJob` — rebuild vector index (also has `ForceRebuild()`)
+- `RecommandJob` — recommendation generation
+- `AIScheduledTaskJob` — user-configured AI scheduled tasks
+
+### Frontend State (`app/src/store/`)
+MobX stores. `RootStore` (`root.ts`) composes all stores. `blinkoStore.tsx` is the primary store for notes (list, filter, CRUD, offline support). The `api` object in `app/src/lib/trpc.ts` is the tRPC client used throughout components and stores.
+
+### Database Schema (key models)
+`accounts`, `notes` (type: 0=blinko, 1=note, 2=todo), `attachments`, `tag`, `tagsToNote`, `comments`, `conversation`, `config`, `aiModels`, `aiScheduledTask`, `notifications`, `follows`
 
 ## Environment Configuration
 
-Create a `.env` file in the root directory with:
 ```
 DATABASE_URL=postgresql://user:password@localhost:5432/blinko
 NEXTAUTH_SECRET=your-secret-key
 NEXTAUTH_URL=http://localhost:1111
 
-# Optional S3 storage
-S3_ENDPOINT=
+# Optional
+TRUST_PROXY=1          # Set to 1 when behind a reverse proxy
+IS_DEMO=true           # Enables demo mode (blocks mutations)
+UPLOAD_PATH=           # Custom upload directory
+S3_ENDPOINT=           # S3-compatible storage
 S3_REGION=
 S3_BUCKET=
 S3_ACCESS_KEY=
 S3_SECRET_KEY=
-
-# AI Providers (optional)
-OPENAI_API_KEY=
-ANTHROPIC_API_KEY=
-# ... other AI provider keys
 ```
 
-## Important Patterns
+## Docker
 
-1. **File Operations**: Use the filesystem routes in `/server/routerExpress/file/` for file handling
-2. **AI Features**: AI providers are configured in `/server/aiServer/providers/`
-3. **Type Safety**: Use tRPC routes when possible for type-safe API calls
-4. **State Management**: Follow MobX patterns in store files
-5. **Component Structure**: React components follow a modular structure with separate index.tsx files
-
-## Deployment
-
-### Docker
 ```bash
-docker-compose -f docker-compose.prod.yml up -d
+docker-compose -f docker-compose.prod.yml up -d   # Production
+docker-compose -f docker-compose.yml up -d --build # Build and run locally
 ```
-
-### Manual Deployment
-1. Build the application: `bun run build:web`
-2. Run migrations: `bun run prisma:migrate:deploy`
-3. Start the server: `bun run start`
-
-## Port Configuration
-- Frontend/Full App: 1111 (default)
-- Backend API: Same port (integrated with Vite Express)
-
-## Mobile Development (Tauri)
-- Android development: `bun run tauri:android:dev`
-- iOS support through Tauri configuration
-- Custom plugin in `/app/tauri-plugin-blinko/`
-
-## Key Dependencies Notes
-- Uses Bun as package manager and runtime
-- Requires Node.js >= 20.0.0
-- PostgreSQL database required
-- Tauri requires Rust toolchain for desktop builds

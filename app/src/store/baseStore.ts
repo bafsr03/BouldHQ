@@ -17,6 +17,7 @@ export class BaseStore implements Store {
       href: '/',
       shallow: true,
       icon: 'basil:lightning-outline',
+      img: '/outlineB.svg',
     },
     {
       title: 'notes',

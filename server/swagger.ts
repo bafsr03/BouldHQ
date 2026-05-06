@@ -4,7 +4,7 @@ import { appRouter } from './routerTrpc/_app';
 import path from 'path';
 
 const trpcOpenApiDocument = generateOpenApiDocument(appRouter, {
-  title: 'Blinko TRPC API',
+  title: 'BouldHQ TRPC API',
   description: 'blinko tRPC API',
   version: '1.0.0',
   baseUrl: '/api',
@@ -22,9 +22,9 @@ const expressSwaggerOptions = {
   definition: {
     openapi: '3.0.0',
     info: {
-      title: 'Blinko Express API',
+      title: 'BouldHQ Express API',
       version: '1.0.0',
-      description: 'Blinko Express API Documentation',
+      description: 'BouldHQ Express API Documentation',
     },
     servers: [
       {

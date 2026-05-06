@@ -57,7 +57,7 @@ const CustomIcon = observer(({ onSubmit }: { onSubmit: (icon: string) => void })
       value={icon}
       onValueChange={setIcon}
       description={<>
-        Blinko use <a className="text-blue-500" href="https://icon-sets.iconify.design/" target="_blank">Iconify</a> for custom icon
+        BouldHQ uses <a className="text-blue-500" href="https://icon-sets.iconify.design/" target="_blank">Iconify</a> for custom icon
       </>}
     />
     <div className="flex justify-end">

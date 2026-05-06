@@ -318,7 +318,7 @@ export class AiService {
         data: {
           content: result.text.trim(),
           noteId,
-          guestName: 'Blinko AI',
+          guestName: 'BouldHQ AI',
           guestIP: '',
           guestUA: '',
         },
@@ -457,7 +457,7 @@ Remember: ALWAYS use tools to implement your suggestions rather than just descri
           data: {
             content: aiResponse,
             noteId,
-            guestName: 'Blinko AI',
+            guestName: 'BouldHQ AI',
             guestIP: '',
             guestUA: '',
           },
@@ -518,7 +518,7 @@ Remember: ALWAYS use tools to implement your suggestions rather than just descri
             data: {
               content: result.text,
               noteId,
-              guestName: 'Blinko AI',
+              guestName: 'BouldHQ AI',
               guestIP: '',
               guestUA: '',
             },
@@ -529,7 +529,7 @@ Remember: ALWAYS use tools to implement your suggestions rather than just descri
             data: {
               content: `⚠️ **Smart Edit Error**\n\nI encountered an error while trying to edit this note. This may happen if the AI model doesn't support function calling or if there was an issue with the edit process.\n\nError details: ${error.message}`,
               noteId,
-              guestName: 'Blinko AI',
+              guestName: 'BouldHQ AI',
               guestIP: '',
               guestUA: '',
             },
