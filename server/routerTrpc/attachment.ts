@@ -409,26 +409,35 @@ export const attachmentsRouter = router({
 
       return await prisma.$transaction(async (tx) => {
         if (isFolder && folderPath) {
+          const ownerFilter = {
+            OR: [
+              { note: { accountId: Number(ctx.id) } },
+              { accountId: Number(ctx.id) }
+            ]
+          };
+
           const attachments = await tx.attachments.findMany({
             where: {
-              note: {
-                accountId: Number(ctx.id)
-              },
+              ...ownerFilter,
               perfixPath: {
                 startsWith: folderPath
               }
             }
           });
 
-          if (attachments.length === 0) {
-            return { success: true, message: 'Folder deleted successfully' };
-          }
-
           try {
             for (const attachment of attachments) {
               await FileService.deleteFile(attachment.path);
             }
-            return { success: true, message: 'Folder and its contents deleted successfully' };
+            await tx.attachments.deleteMany({
+              where: {
+                ...ownerFilter,
+                perfixPath: {
+                  startsWith: folderPath
+                }
+              }
+            });
+            return { success: true, message: 'Folder deleted successfully' };
           } catch (error) {
             throw new Error(`Failed to delete folder: ${error.message}`);
           }
