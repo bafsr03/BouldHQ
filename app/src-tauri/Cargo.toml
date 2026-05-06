@@ -1,8 +1,8 @@
 [package]
-name = "Blinko"
+name = "BouldHQ"
 version = "0.1.0"
-description = "A Blinko App"
-authors = ["blinko-space"]
+description = "A BouldHQ App"
+authors = ["bouldhq"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
