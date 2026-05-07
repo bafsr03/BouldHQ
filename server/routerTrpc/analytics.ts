@@ -14,15 +14,24 @@ export const analyticsRouter = router({
       count: z.number()
     })))
     .mutation(async function ({ ctx }) {
+      // BouldHQ: count notes + top-level tag (store) creations per day so the heatmap reflects both.
       const dailyStats = await prisma.$queryRaw<Array<{ date: string; count: bigint }>>`
-        SELECT 
-          to_char("createdAt"::date, 'YYYY-MM-DD') as date,
-          COUNT(*) as count
-        FROM "notes"
-        WHERE "accountId" = ${parseInt(ctx.id)}
-          AND "createdAt" >= NOW() - INTERVAL '1 year'
-        GROUP BY "createdAt"::date
-        ORDER BY "createdAt"::date ASC
+        WITH activity AS (
+          SELECT "createdAt"::date AS d
+          FROM "notes"
+          WHERE "accountId" = ${parseInt(ctx.id)}
+            AND "createdAt" >= NOW() - INTERVAL '1 year'
+          UNION ALL
+          SELECT "createdAt"::date AS d
+          FROM "tag"
+          WHERE "accountId" = ${parseInt(ctx.id)}
+            AND "parent" = 0
+            AND "createdAt" >= NOW() - INTERVAL '1 year'
+        )
+        SELECT to_char(d, 'YYYY-MM-DD') AS date, COUNT(*) AS count
+        FROM activity
+        GROUP BY d
+        ORDER BY d ASC
       `;
 
       return dailyStats.map(stat => ({

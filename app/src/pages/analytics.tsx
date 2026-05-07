@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import { observer } from "mobx-react-lite"
 import { RootStore } from "@/store/root"
 import { AnalyticsStore } from "@/store/analyticsStore"
@@ -10,6 +10,8 @@ import dayjs from "dayjs"
 import { Dropdown, DropdownTrigger, DropdownMenu, DropdownItem, Button } from "@heroui/react"
 import { Icon } from '@/components/Common/Iconify/icons'
 import { ScrollArea } from '@/components/Common/ScrollArea'
+import { AnalyticsCounters } from '@/components/BouldHQ/AnalyticsCounters'
+import { api } from '@/lib/trpc'
 
 const Analytics = observer(() => {
   const analyticsStore = RootStore.Get(AnalyticsStore)
@@ -32,6 +34,16 @@ const Analytics = observer(() => {
   ] as [string, number]) ?? []
 
   const stats = analyticsStore.monthlyStats.value
+
+  const [renewalDates, setRenewalDates] = useState<string[]>([])
+  useEffect(() => {
+    api.storeProfile.list.query().then(profiles => {
+      const dates = profiles
+        .map(p => p.renewalDate ? dayjs(p.renewalDate).format('YYYY-MM-DD') : null)
+        .filter((d): d is string => !!d)
+      setRenewalDates(dates)
+    }).catch(err => console.error('storeProfile.list', err))
+  }, [])
 
   return (
     <ScrollArea onBottom={() => { }} fixMobileTopBar className="px-6 space-y-2 md:p-6 md:space-y-6  mx-auto max-w-7xl" >
@@ -70,12 +82,15 @@ const Analytics = observer(() => {
         </Dropdown>
       </div>
 
+      <AnalyticsCounters />
+
       <StatsCards stats={stats ?? {}} />
 
       <HeatMap
         data={data}
         title={t('heatMapTitle')}
         description={t('heatMapDescription')}
+        renewalDates={renewalDates}
       />
 
       {

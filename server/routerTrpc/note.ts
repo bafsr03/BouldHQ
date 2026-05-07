@@ -14,6 +14,7 @@ import { Context } from '../context';
 import { cache } from '@shared/lib/cache';
 import { AiModelFactory } from '@server/aiServer/aiModelFactory';
 import { authProcedure, demoAuthMiddleware, publicProcedure, router } from '@server/middleware';
+import { ensureBrandingFolderForTag, routeAttachmentToBrandingFolder } from '@server/lib/bouldhq';
 
 const extractHashtags = (input: string): string[] => {
   const withoutCodeBlocks = input.replace(/```[\s\S]*?```/g, '');
@@ -1008,6 +1009,10 @@ export const noteRouter = router({
         }
         const oldTagsInThisNote = await prisma.tagsToNote.findMany({ where: { noteId: note.id }, include: { tag: true } });
         await handleAddTags(tagTree, undefined, note.id);
+        // BouldHQ: ensure Branding Assets/<tagname>/ subfolder exists for each top-level client tag
+        for (const t of newTags.filter(t => t && t.parent === 0)) {
+          ensureBrandingFolderForTag(Number(ctx.id), t.name).catch(e => console.error('ensureBrandingFolder', e));
+        }
         const oldTags = oldTagsInThisNote.map((i) => i.tag).filter((i) => !!i);
         const oldTagsString = oldTags.map((i) => `${i?.name}<key>${i?.parent}`);
         const newTagsString = newTags.map((i) => `${i?.name}<key>${i?.parent}`);
@@ -1100,6 +1105,15 @@ export const noteRouter = router({
                 where: { id: { in: attachmentsIds.map((i) => i.id) } },
                 data: { noteId: note.id },
               });
+              // BouldHQ: route new attachments into Branding Assets/<tag>/ if the note has exactly one top-level client tag
+              const topLevelTags = newTags.filter(t => t && t.parent === 0);
+              if (topLevelTags.length === 1) {
+                const tagName = topLevelTags[0].name;
+                for (const a of attachmentsIds) {
+                  routeAttachmentToBrandingFolder(a.id, Number(ctx.id), tagName)
+                    .catch(e => console.error('routeAttachmentToBrandingFolder', e));
+                }
+              }
             }
           }
         } catch (err) {
@@ -1130,8 +1144,21 @@ export const noteRouter = router({
             },
           });
           await handleAddTags(tagTree, undefined, note.id);
+          // BouldHQ: ensure Branding Assets/<tagname>/ subfolder exists for each top-level client tag
+          for (const t of newTags.filter(t => t && t.parent === 0)) {
+            ensureBrandingFolderForTag(Number(ctx.id), t.name).catch(e => console.error('ensureBrandingFolder', e));
+          }
           const attachmentsIds = await prisma.attachments.findMany({ where: { path: { in: attachments.map((i) => i.path) } } });
           await prisma.attachments.updateMany({ where: { id: { in: attachmentsIds.map((i) => i.id) } }, data: { noteId: note.id } });
+          // BouldHQ: route new attachments into Branding Assets/<tag>/ if the note has exactly one top-level client tag
+          const topLevelTagsForCreate = newTags.filter(t => t && t.parent === 0);
+          if (topLevelTagsForCreate.length === 1) {
+            const tagName = topLevelTagsForCreate[0].name;
+            for (const a of attachmentsIds) {
+              routeAttachmentToBrandingFolder(a.id, Number(ctx.id), tagName)
+                .catch(e => console.error('routeAttachmentToBrandingFolder', e));
+            }
+          }
           //add references
           if (references && references.length > 0) {
             await prisma.noteReference.createMany({

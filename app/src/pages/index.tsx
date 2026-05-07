@@ -16,6 +16,8 @@ import { NoteType } from '@shared/lib/types';
 import { Icon } from '@/components/Common/Iconify/icons';
 import { DndContext, closestCenter, DragOverlay } from '@dnd-kit/core';
 import { useDragCard, DraggableBlinkoCard } from '@/hooks/useDragCard';
+import { WelcomeScreen, QuickActionsBar } from '@/components/BouldHQ/WelcomeScreen';
+import { StoreProfileCard } from '@/components/BouldHQ/StoreProfileCard';
 
 interface TodoGroup {
   displayDate: string;
@@ -77,6 +79,22 @@ const Home = observer(() => {
     }
   }))
 
+  const activeClientTag = useMemo(() => {
+    const tagId = blinko.noteListFilterConfig.tagId;
+    if (!tagId) return undefined;
+    return blinko.tagList.value?.falttenTags?.find(t => t.id === tagId)?.name || undefined;
+  }, [blinko.noteListFilterConfig.tagId, blinko.tagList.value]);
+
+  const showWelcome = useMemo(() => {
+    const isDefaultView = !isTodoView && !isNotesView && !isArchivedView && !isTrashView && !isAllView;
+    return (
+      isDefaultView &&
+      !blinko.noteListFilterConfig.tagId &&
+      !currentListState.isLoading &&
+      currentListState.isEmpty
+    );
+  }, [isTodoView, isNotesView, isArchivedView, isTrashView, isAllView, blinko.noteListFilterConfig.tagId, currentListState.isLoading, currentListState.isEmpty]);
+
   const todosByDate = useMemo(() => {
     if (!isTodoView || !currentListState.value) return {} as Record<string, TodoGroup>;
     const todoItems = currentListState.value;
@@ -131,6 +149,15 @@ const Home = observer(() => {
       }}
       className={`pt-1 md:p-0 relative h-full flex flex-col-reverse md:flex-col mx-auto w-full`}>
 
+      {blinko.noteListFilterConfig.tagId && activeClientTag && (
+        <div className="pt-2 md:pt-4 pb-3 md:pb-5">
+          <StoreProfileCard
+            tagId={blinko.noteListFilterConfig.tagId}
+            tagName={activeClientTag}
+          />
+        </div>
+      )}
+
       {store.showEditor && isPc && !blinko.config.value?.hidePcEditor && <div className='px-2 md:px-6' >
         <BlinkoEditor mode='create' key='create-key' onHeightChange={height => {
           if (!isPc) return
@@ -139,10 +166,18 @@ const Home = observer(() => {
       </div>}
       {(!isPc || blinko.config.value?.hidePcEditor) && <BlinkoAddButton />}
 
-      <LoadingAndEmpty
-        isLoading={currentListState.isLoading}
-        isEmpty={currentListState.isEmpty}
-      />
+      {store.showEditor && !showWelcome && (
+        <QuickActionsBar activeClientTag={activeClientTag} />
+      )}
+
+      {showWelcome ? (
+        <WelcomeScreen activeClientTag={activeClientTag} />
+      ) : (
+        <LoadingAndEmpty
+          isLoading={currentListState.isLoading}
+          isEmpty={currentListState.isEmpty}
+        />
+      )}
 
       {
         !currentListState.isEmpty &&

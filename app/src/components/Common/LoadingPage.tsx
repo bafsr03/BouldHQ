@@ -31,8 +31,8 @@ export const LoadingPage = () => {
         >
           <div className="rounded-3xl overflow-hidden">
             <img
-              src="/loading.gif"
-              className="w-[70px] h-[70px] md:w-[100px] md:h-[100px] object-contain"
+              src="/bouldtoy.png"
+              className="w-[140px] h-[140px] md:w-[200px] md:h-[200px] object-contain"
             />
           </div>
         </motion.div>

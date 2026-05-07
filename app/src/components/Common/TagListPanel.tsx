@@ -18,8 +18,20 @@ import { eventBus } from "@/lib/event";
 import { DialogStore } from "@/store/module/Dialog";
 import { AiStore } from "@/store/aiStore";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { UserStore } from "@/store/user";
+import { getBlinkoEndpoint } from "@/lib/blinkoEndpoint";
 
-const Emoji = ({ icon }: { icon: string }) => {
+const Emoji = ({ icon, logoUrl, tagName }: { icon: string; logoUrl?: string; tagName?: string }) => {
+  if (logoUrl) {
+    return (
+      <img
+        src={logoUrl}
+        alt={tagName || ''}
+        className="w-[22px] h-[22px] rounded-sm object-cover"
+        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+      />
+    );
+  }
   return <>
     {
       icon ? <>
@@ -89,6 +101,22 @@ export const TagListPanel = observer(() => {
     return blinko.noteListFilterConfig.tagId == id && searchParams.get('path') == 'all'
   }
   useEffect(() => { }, [blinko.noteListFilterConfig.tagId])
+
+  const [logoMap, setLogoMap] = useState<Record<number, string>>({});
+  useEffect(() => {
+    api.storeProfile.list.query()
+      .then(profiles => {
+        const token = RootStore.Get(UserStore).tokenData.value?.token;
+        const m: Record<number, string> = {};
+        for (const p of profiles) {
+          if (p.logoPath) {
+            m[p.tagId] = getBlinkoEndpoint(`${p.logoPath}${token ? `?token=${encodeURIComponent(token)}` : ''}`);
+          }
+        }
+        setLogoMap(m);
+      })
+      .catch(err => console.error('storeProfile.list', err));
+  }, [blinko.tagList.value]);
   return (
     <>
       <div className="ml-2 my-2 text-xs font-bold text-primary">{t('total-tags')}</div>
@@ -131,14 +159,17 @@ export const TagListPanel = observer(() => {
                   </div>
                   <div className="group-hover:opacity-0 opacity-100 w-[24px] group-hover:w-0 !transition-all">
                     {
-                      element.metadata?.icon ? <Emoji icon={element.metadata?.icon as string} />
-                        : <Icon icon="mingcute:hashtag-line" width="20" height="20" />
+                      logoMap[element.id as number]
+                        ? <Emoji icon={element.metadata?.icon as string} logoUrl={logoMap[element.id as number]} tagName={element.name} />
+                        : element.metadata?.icon
+                          ? <Emoji icon={element.metadata?.icon as string} />
+                          : <Icon icon="mingcute:hashtag-line" width="20" height="20" />
                     }
                   </div>
                 </div>
               ) : (
                 <div>
-                  <Emoji icon={element.metadata?.icon as string} />
+                  <Emoji icon={element.metadata?.icon as string} logoUrl={logoMap[element.id as number]} tagName={element.name} />
                 </div>
               )}
 

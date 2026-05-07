@@ -417,6 +417,8 @@ export class UserStore implements Store {
           this.initializeSettings(setTheme, i18n);
           if (tokenData?.user?.id) {
             this.userInfo.call(Number(tokenData.user.id));
+            // BouldHQ: idempotent bootstrap (seeds default Resources folders + ensures weekly tracker note)
+            api.bouldhq.bootstrap.mutate().catch(err => console.error('bouldhq.bootstrap', err));
           }
         });
       });
@@ -461,6 +463,10 @@ export class UserStore implements Store {
 
     useEffect(() => {
       this.userInfo.call(Number(this.id));
+      if (this.id) {
+        // BouldHQ: idempotent bootstrap on every authenticated session start (covers reloads + fresh logins)
+        api.bouldhq.bootstrap.mutate().catch(err => console.error('bouldhq.bootstrap', err));
+      }
     }, [this.id]);
 
     useEffect(() => {

@@ -126,11 +126,20 @@ export const CommonLayout = observer(({ children, header }: { children?: React.R
                 <div className="w-[4px] h-[16px] bg-primary rounded-xl hidden md:block" />
                 <div className="flex flex-row items-center gap-1">
                   <div className="font-black select-none">
-                    {location.pathname == '/ai'
-                      ? !!RootStore.Get(AiStore).currentConversation.value?.title
-                        ? RootStore.Get(AiStore).currentConversation.value?.title
-                        : t(base.currentTitle)
-                      : t(base.currentTitle)}
+                    {(() => {
+                      if (location.pathname == '/ai') {
+                        return !!RootStore.Get(AiStore).currentConversation.value?.title
+                          ? RootStore.Get(AiStore).currentConversation.value?.title
+                          : t(base.currentTitle);
+                      }
+                      // BouldHQ: when filtering by a client tag, show the store/tag name instead of "total"
+                      const tagIdParam = searchParams.get('tagId');
+                      if (searchParams.get('path') === 'all' && tagIdParam) {
+                        const tagName = blinkoStore.tagList.value?.falttenTags?.find(t => t.id === Number(tagIdParam))?.name;
+                        if (tagName) return tagName;
+                      }
+                      return t(base.currentTitle);
+                    })()}
                   </div>
                   {searchParams.get('path') != 'trash' ? (
                     <Icon

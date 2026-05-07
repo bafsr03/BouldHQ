@@ -9,9 +9,10 @@ interface HeatMapProps {
   data: Array<[string, number]>
   title?: string
   description?: string
+  renewalDates?: string[] // YYYY-MM-DD strings, marks subscription-renewal cells
 }
 
-export const HeatMap = ({ data, title, description }: HeatMapProps) => {
+export const HeatMap = ({ data, title, description, renewalDates }: HeatMapProps) => {
   const chartRef = useRef<HTMLDivElement>(null)
   const isPc = useMediaQuery('(min-width: 768px)')
   const { theme } = useTheme()
@@ -66,7 +67,11 @@ export const HeatMap = ({ data, title, description }: HeatMapProps) => {
       backgroundColor: backgroundColor,
       tooltip: {
         formatter: function (params: any) {
-          return `${params.value[0]}: ${params.value[1]} ${t('notes')}`
+          const date = params.value[0]
+          const count = params.value[1]
+          const updatesLabel = count === 1 ? t('tooltip-update', { count }) : t('tooltip-updates', { count })
+          const renewalSuffix = renewalDates?.includes(date) ? `<br/>${t('subscription-active')}` : ''
+          return `${date}: ${updatesLabel}${renewalSuffix}`
         }
       },
       visualMap: {

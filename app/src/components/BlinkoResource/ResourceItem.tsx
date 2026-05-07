@@ -160,7 +160,7 @@ const ResourceCard = observer(({ item, isSelected, onSelect, isDragging, isDragg
       <Card {...cardProps} shadow="none">
         <div className="flex items-center gap-4 ml-[45px]">
           <div className="w-[36px] h-[36px] ml-[-7px] flex items-center justify-center">
-            <Icon icon="material-symbols:folder" className="w-full h-full text-yellow-500" />
+            <Icon icon="material-symbols:folder" className="w-full h-full text-default-400" />
           </div>
           <div className="flex-1">
             <div className="font-medium">{item.folderName}</div>

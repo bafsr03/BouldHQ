@@ -125,6 +125,27 @@ model tag {
   tagsToNote tagsToNote[]
   sortOrder  Int          @default(0)
   account    accounts?    @relation(fields: [accountId], references: [id])
+  storeProfile storeProfile?
+}
+
+// BouldHQ — per-tag store metadata. Each client tag (e.g. #novalabel) can have one storeProfile.
+model storeProfile {
+  id               Int       @id @default(autoincrement())
+  tagId            Int       @unique
+  accountId        Int
+  storeUrl         String    @default("") @db.VarChar(500)
+  collabAccess     Boolean   @default(false)
+  shopifyPlan      String    @default("") @db.VarChar(50) // legacy — retained, no longer displayed
+  adminUrl         String    @default("") @db.VarChar(500)
+  collaboratorCode String    @default("") @db.VarChar(20)
+  logoPath         String    @default("") @db.VarChar(500)
+  renewalDate      DateTime? @db.Timestamptz(6)
+  createdAt        DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @db.Timestamptz(6)
+
+  tag           tag       @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
 }
 
 model tagsToNote {
