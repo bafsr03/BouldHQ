@@ -34,6 +34,7 @@ async function build() {
         '@langchain/community',
         'sharp',
         'esbuild',
+        'fsevents',
         'sqlite3',
         '@libsql/linux-x64-musl',
         '@libsql/linux-x64-gnu',

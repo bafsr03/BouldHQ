@@ -84,7 +84,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
         `  • {{BOULDHQ_LOGO_URL}} = "${bouldhqLogoUrl}"\n` +
         `  • {{STORE_LOGO_URL}} = ${storeLogoUrl ? `"${storeLogoUrl}"` : '""  (no store logo on file — omit the store-logo <img> entirely, fall back to the store name pill)'}\n` +
         `  • {{STORE_URL}} = ${storeUrl ? `"${storeUrl}"` : '""  (no URL on file — omit the meta link)'}\n` +
-        `  • {{STORE_URL_DISPLAY}} = ${storeUrl ? `"${storeUrl.replace(/^https?:\\/\\//, '')}"` : '""'}\n` +
+        `  • {{STORE_URL_DISPLAY}} = ${storeUrl ? `"${storeUrl.replace(/^https?:\/\//, '')}"` : '""'}\n` +
         `  • {{TIMESTAMP}} = "${new Date().toISOString()}"\n\n` +
         `Use the {{BOULDHQ_LOGO_URL}} value INSIDE the header <img class="bouldhq-mark" src="..."> AND inside the footer mark. ` +
         `Use {{STORE_LOGO_URL}} for the header store mark <img class="store-mark"> if it's set; if it's empty, fall back to the "store" pill with the store name. ` +
