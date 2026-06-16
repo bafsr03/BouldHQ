@@ -1,8 +1,15 @@
 import { useState, useEffect, lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { ThemeProvider } from 'next-themes';
-import { Inspector, InspectParams } from 'react-dev-inspector';
 import { HeroUIProvider } from '@heroui/react';
+
+// react-dev-inspector is a dev-only click-to-source tool. Keep it out of
+// production entirely — the eager import was the root cause of v1.8.16's
+// "Cannot access 'Le' before initialization" boot crash. Vite drops the
+// branch at build time when import.meta.env.DEV is false.
+const DevInspector = import.meta.env.DEV
+  ? lazy(() => import('react-dev-inspector').then((m) => ({ default: m.Inspector })))
+  : null;
 import './styles/github-markdown.css';
 import 'react-photo-view/dist/react-photo-view.css';
 import '@/lib/i18n';
@@ -281,14 +288,18 @@ function App() {
 
   return (
     <>
-      <Inspector
-        keys={['control', 'alt', 'x']}
-        onClickElement={({ codeInfo }: InspectParams) => {
-          if (!codeInfo?.absolutePath) return
-          const { absolutePath, lineNumber, columnNumber } = codeInfo
-          window.open(`cursor://file/${absolutePath}:${lineNumber}:${columnNumber}`)
-        }}
-      />
+      {DevInspector && (
+        <Suspense fallback={null}>
+          <DevInspector
+            keys={['control', 'alt', 'x']}
+            onClickElement={({ codeInfo }: any) => {
+              if (!codeInfo?.absolutePath) return;
+              const { absolutePath, lineNumber, columnNumber } = codeInfo;
+              window.open(`cursor://file/${absolutePath}:${lineNumber}:${columnNumber}`);
+            }}
+          />
+        </Suspense>
+      )}
       <BrowserRouter>
         <HeroUIProvider>
           <ThemeProvider attribute="class" enableSystem={false}>
