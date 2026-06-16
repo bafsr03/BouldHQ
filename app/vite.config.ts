@@ -125,10 +125,25 @@ export default defineConfig({
       '@shared': path.resolve(__dirname, '../shared')
     }
   },
+  // Match the build target so esbuild doesn't downlevel modern syntax
+  // (class private fields, static blocks) inside transformed deps.
+  esbuild: {
+    target: 'es2022',
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      target: 'es2022',
+    },
+  },
   build: {
     outDir: "../dist/public",
     emptyOutDir: true,
     chunkSizeWarningLimit: 2000,
+    // Tauri ships a current WebKit, and modern browsers all support ES2022
+    // (class private fields #x, static blocks, top-level await). Without this,
+    // esbuild's downleveling of e.g. lru-cache@11's pre-minified ESM breaks
+    // class constructors → "Object is not a constructor (new Whr)" at boot.
+    target: 'es2022',
     rollupOptions: {
       output: {
         // Keep the chunks Rollup picks. A previous `ui-components` manual
