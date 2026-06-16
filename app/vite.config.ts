@@ -131,26 +131,24 @@ export default defineConfig({
     chunkSizeWarningLimit: 2000,
     rollupOptions: {
       output: {
+        // Keep the chunks Rollup picks. A previous `ui-components` manual
+        // chunk grouped every `react-*` and `@react-*` package together,
+        // which broke initialization ordering for circular-import packages
+        // (notably `react-dev-inspector`) and crashed production with
+        // "Cannot access 'Le' before initialization" on app boot.
+        // The default chunking is safe; only react/react-dom stay grouped
+        // because they're a huge win for cache hits and have no cycles.
         manualChunks: (id) => {
-          if (id.includes('node_modules/react') || 
-              id.includes('node_modules/react-dom') || 
-              id.includes('node_modules/react-router-dom')) {
+          if (id.includes('node_modules/react/') ||
+              id.includes('node_modules/react-dom/') ||
+              id.includes('node_modules/scheduler/')) {
             return 'react-vendor';
           }
-          
-          if (id.includes('node_modules/@react-') || 
-              id.includes('node_modules/react-') || 
-              id.includes('node_modules/@ui-') || 
-              id.includes('node_modules/@headlessui') || 
-              id.includes('node_modules/headlessui')) {
-            return 'ui-components';
-          }
-          
-          if (id.includes('node_modules/lodash') || 
-              id.includes('node_modules/axios') || 
+          if (id.includes('node_modules/lodash') ||
               id.includes('node_modules/date-fns')) {
             return 'utils';
           }
+          // Everything else: let Rollup decide. Don't force a grouping.
         }
       }
     }
