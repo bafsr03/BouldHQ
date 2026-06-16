@@ -1,4 +1,4 @@
-import { router, authProcedure } from '../middleware';
+import { router, authProcedure, founderProcedure } from '../middleware';
 import { userCaller } from './_app';
 import { z } from 'zod';
 import { AiService } from '@server/aiServer';
@@ -18,9 +18,11 @@ import { expandSlashCommand } from '@server/aiServer/slashCommands';
 
 export const aiRouter = router({
   // Reports whether the owner has wired up the Claude Code subscription.
-  // Surfaced on the /ai page so team members get a clear error state when
+  // Surfaced on the /ai page so the founder gets a clear error state when
   // the token isn't configured rather than an opaque 500.
-  claudeCodeStatus: authProcedure
+  // Founder-only — the assistant has destructive powers; only the founder
+  // is trusted to operate it.
+  claudeCodeStatus: founderProcedure
     .query(async () => {
       return {
         configured: isClaudeCodeConfigured(),
@@ -79,7 +81,9 @@ export const aiRouter = router({
   // into the existing conversation/message tables, tagged with
   // metadata.kind='assistant' so we can list/delete just these chats from a
   // sidebar without dragging in the broader Blinko completions history.
-  assistantChat: authProcedure
+  // Founder-only — assistant has destructive tools (delete files, move
+  // attachments, etc.). Other roles get a clear FORBIDDEN.
+  assistantChat: founderProcedure
     .input(z.object({
       message: z.string().min(1),
       history: z.array(z.object({
@@ -181,7 +185,8 @@ export const aiRouter = router({
 
   // List the caller's assistant conversations, newest first. Filters by
   // message metadata so we don't surface unrelated Blinko-side conversations.
-  listAssistantConversations: authProcedure
+  // Founder-only.
+  listAssistantConversations: founderProcedure
     .input(z.object({
       page: z.number().default(1),
       size: z.number().default(30),
@@ -218,8 +223,8 @@ export const aiRouter = router({
     }),
 
   // Load a single assistant conversation's full message list. Used when the
-  // user clicks a row in the history sidebar.
-  getAssistantConversation: authProcedure
+  // user clicks a row in the history sidebar. Founder-only.
+  getAssistantConversation: founderProcedure
     .input(z.object({ id: z.number() }))
     .query(async ({ input, ctx }) => {
       const accountId = Number(ctx.id);
@@ -245,7 +250,8 @@ export const aiRouter = router({
       };
     }),
 
-  deleteAssistantConversation: authProcedure
+  // Founder-only.
+  deleteAssistantConversation: founderProcedure
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input, ctx }) => {
       const accountId = Number(ctx.id);

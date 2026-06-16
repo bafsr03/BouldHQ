@@ -53,6 +53,10 @@ export class BaseStore implements Store {
       href: '/ai',
       icon: 'hugeicons:ai-magic',
       hiddenMobile: true,
+      // Assistant has destructive tools (delete files, move attachments,
+      // rename folders). Founder-only — server enforces this too via
+      // founderProcedure on every assistant endpoint.
+      founderOnly: true,
     },
     {
       title: 'analytics',

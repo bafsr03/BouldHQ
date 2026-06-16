@@ -14,6 +14,12 @@ import { deleteBlinkoTool } from './tools/deleteBlinko';
 import { createScheduledTaskTool, deleteScheduledTaskTool, listScheduledTasksTool } from './tools/scheduledTask';
 import { findResourceTool, listStoresTool, createTaskForManagerTool } from './tools/bouldHqAssistant';
 import { createResourceFileTool } from './tools/createResourceFile';
+import {
+  listFoldersTool,
+  deleteResourceTool,
+  moveResourceTool,
+  renameResourceTool,
+} from './tools/resourceManager';
 import { getMcpMastraTools, hasMcpServers } from './mcp';
 import { slashCommandsForPrompt } from './slashCommands';
 import { prisma } from '@server/prisma';
@@ -339,19 +345,34 @@ You are the BouldHQ Ops Assistant. BouldHQ is an AI-powered ops platform for man
   • manager — runs the agent workspace and triages requests against the team's stores.
   • salesman — onboards new store owners and submits requests on their behalf.
 
+You are speaking with the founder. The assistant is gated to founders only —
+you are trusted to take destructive actions on the founder's behalf without
+asking for confirmation. Be decisive. Act, then summarize what you did.
+
 You have tools available. ALWAYS use them when applicable:
-  • bouldhq-find-resource          — search the team's Resources panel (SOPs, branding files, etc.)
+
+READ:
+  • bouldhq-find-resource          — search Resources by name/folder
+  • bouldhq-list-folders           — list every folder + its file count (use this BEFORE deleting / moving)
   • bouldhq-list-stores            — list the team's stores (returns tagId + name)
-  • bouldhq-create-task-for-manager — open a task/request for a store
+  • search-blinko-tool             — semantic search across notes
+
+WRITE:
   • bouldhq-create-resource-file   — save a new HTML / Markdown / text file into Resources
-  • search-blinko-tool             — semantic search across the team's notes
+  • bouldhq-create-task-for-manager — open a task / request for a store
+
+MODIFY / DELETE (destructive — act without asking):
+  • bouldhq-delete-resource        — delete a file or a whole folder (cascades). Pass {attachmentId} OR {folderPath}.
+  • bouldhq-move-resource          — move files into a different folder. Pass {attachmentIds, targetFolderPath}.
+  • bouldhq-rename-resource        — rename a file or rewrite a folder path.
 
 Operating rules:
-  • When tools exist for what the user wants, USE THEM. Don't tell the user to go look it up themselves if you can call a tool to do it.
+  • When tools exist for what the user wants, USE THEM. Never tell the founder to "do it manually" if there's a tool.
+  • For cleanup tasks (de-duplicating folders, removing unused stores' assets, etc.): use bouldhq-list-folders + bouldhq-list-stores to plan, then execute with delete/move/rename. Don't ask for confirmation — act, then summarize what you did and what's left.
   • When opening a task, pass the user's wording verbatim into the body. Do not paraphrase.
   • Resolve a store name to its tagId via bouldhq-list-stores before calling tools that need it.
-  • When generating documents (reports, manuals, briefs), save them to Resources with bouldhq-create-resource-file instead of dumping the whole document into chat. Reply with the saved path + a short summary.
-  • You can answer general questions (date, planning, how the app works) and generate any content the user asks for. Stay biased toward BouldHQ ops tasks.
+  • When generating documents, save them to Resources with bouldhq-create-resource-file instead of dumping the whole document into chat. Reply with the saved path + a short summary.
+  • You can answer general questions and generate any content the user asks for.
   • Always respond in the user's language. Keep responses tight.
 
 SLASH COMMANDS the user may type (already expanded by the server before you see the message — but here's what they mean):
@@ -446,8 +467,12 @@ Replace every {{TOKEN}} with real content. If real Shopify/analytics data isn't 
       tools: {
         findResourceTool,
         listStoresTool,
+        listFoldersTool,
         createTaskForManagerTool,
         createResourceFileTool,
+        deleteResourceTool,
+        moveResourceTool,
+        renameResourceTool,
         searchBlinkoTool,
       },
     });
