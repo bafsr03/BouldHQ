@@ -392,9 +392,13 @@ BRAND PALETTE (use the CSS variables, do not hardcode hex values elsewhere):
   • --hairline       #E5E7EB   subtle dividers
 
 HEADER must be co-branded:
-  [BouldHQ logo mark] × [STORE NAME]
-  with a tiny meta row underneath: store URL + week-of date.
-  Use the inline SVG bolt mark below for the BouldHQ logo. Do NOT swap it for an emoji.
+  [BouldHQ logo image] × [STORE LOGO image OR store name pill]
+  with the date + (optional) store URL on the right.
+  The /report slash command supplies real URLs for both logos via
+  {{BOULDHQ_LOGO_URL}} and {{STORE_LOGO_URL}}. Drop them directly into
+  <img src="..."> tags. If {{STORE_LOGO_URL}} is empty, OMIT the
+  store-logo img entirely and fall back to the .store text pill.
+  NEVER inline base64 — always use the provided URLs.
 
 Skeleton (replace every {{TOKEN}}; never invent metrics — for missing data write <em class="placeholder">Awaiting Shopify analytics integration</em>; keep bullet lists to 3–6 items each):
 
@@ -431,24 +435,33 @@ Skeleton (replace every {{TOKEN}}; never invent metrics — for missing data wri
     border-bottom: 1px solid var(--hairline);
   }
   .cobrand-marks {
-    display: flex; align-items: center; gap: 14px;
+    display: flex; align-items: center; gap: 18px;
     font-weight: 700; font-size: 22px; letter-spacing: -0.02em;
     color: var(--brand-primary);
   }
-  .cobrand-marks .bouldhq {
-    display: inline-flex; align-items: center; gap: 8px;
+  .cobrand-marks .bouldhq-mark {
+    height: 28px; width: auto; display: block;
+    /* The BouldHQ wordmark ships white-on-transparent — inverted so it
+       reads on the lavender card background. */
+    filter: invert(1) brightness(0.18);
   }
-  .cobrand-marks .bouldhq svg { color: var(--brand-accent); }
+  .cobrand-marks .store-mark {
+    height: 32px; width: auto; display: block;
+    border-radius: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 4px 8px;
+  }
   .cobrand-marks .x {
-    color: var(--muted); font-weight: 400; font-size: 18px;
+    color: var(--muted); font-weight: 400; font-size: 22px; line-height: 1;
     transform: translateY(-1px);
   }
   .cobrand-marks .store {
     color: var(--brand-primary);
     border: 1px solid var(--border);
     background: var(--surface);
-    padding: 4px 12px; border-radius: 999px;
-    font-size: 18px;
+    padding: 4px 14px; border-radius: 999px;
+    font-size: 17px;
   }
   header .meta { color: var(--muted); font-size: 12.5px; text-align: right; line-height: 1.55; }
   header .meta a { color: var(--brand-accent); text-decoration: none; }
@@ -506,7 +519,7 @@ Skeleton (replace every {{TOKEN}}; never invent metrics — for missing data wri
     border-top: 1px solid var(--hairline);
   }
   footer .footer-mark { display: inline-flex; align-items: center; gap: 6px; color: var(--brand-primary); font-weight: 600; }
-  footer .footer-mark svg { color: var(--brand-accent); }
+  footer .footer-mark img { height: 14px; width: auto; filter: invert(1) brightness(0.18); }
 </style>
 </head>
 <body>
@@ -514,14 +527,13 @@ Skeleton (replace every {{TOKEN}}; never invent metrics — for missing data wri
 
     <header class="cobrand">
       <div class="cobrand-marks">
-        <span class="bouldhq">
-          <!-- BouldHQ bolt mark — use this exact SVG -->
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/>
-          </svg>
-          BouldHQ
-        </span>
+        <!-- BouldHQ wordmark — uses the URL the server supplies. -->
+        <img class="bouldhq-mark" src="{{BOULDHQ_LOGO_URL}}" alt="BouldHQ" />
         <span class="x">×</span>
+        <!-- Store mark: if {{STORE_LOGO_URL}} is set, use the img;
+             otherwise fall back to the text pill. Pick ONE of these two
+             lines and delete the other when filling the template. -->
+        <img class="store-mark" src="{{STORE_LOGO_URL}}" alt="{{STORE}}" />
         <span class="store">{{STORE}}</span>
       </div>
       <div class="meta">
@@ -567,10 +579,7 @@ Skeleton (replace every {{TOKEN}}; never invent metrics — for missing data wri
 
     <footer>
       <span class="footer-mark">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/>
-        </svg>
-        BouldHQ
+        <img src="{{BOULDHQ_LOGO_URL}}" alt="BouldHQ" />
       </span>
       &nbsp;·&nbsp; Generated {{TIMESTAMP}}
     </footer>

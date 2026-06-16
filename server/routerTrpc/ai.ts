@@ -105,9 +105,18 @@ export const aiRouter = router({
         const accountId = Number(ctx.id);
         const agent = await AiModelFactory.BouldHqAssistantAgent();
         // Slash commands (e.g. /report joon) are expanded into a longer
-        // instruction here so the agent gets a deterministic prompt.
-        // The ORIGINAL user message is what we save to history.
-        const effectiveMessage = expandSlashCommand(input.message);
+        // instruction here so the agent gets a deterministic prompt. The
+        // expander needs accountId + baseUrl (for /report which embeds
+        // absolute logo URLs in the generated HTML). The ORIGINAL user
+        // message is what we save to history.
+        const headers = (ctx as any)?.req?.headers ?? {};
+        const proto = headers['x-forwarded-proto'] || 'https';
+        const host = headers['x-forwarded-host'] || headers.host || 'hq.bouldhq.com';
+        const baseUrl = `${proto}://${host}`;
+        const effectiveMessage = await expandSlashCommand(input.message, {
+          accountId,
+          baseUrl,
+        });
 
         // Resolve or create the conversation row first so we always have an
         // id to attach messages to.

@@ -6,13 +6,34 @@
 // commands manual is generated from, so /help, the system prompt, the doc,
 // and the runtime never drift.
 
+import { prisma } from '@server/prisma';
+
+// Public asset path for the BouldHQ wordmark. Lives in app/public/ so it
+// ships with the frontend and is reachable at <origin>/bouldhq-logo.png.
+const BOULDHQ_LOGO_PATH = '/bouldhq-logo.png';
+
+function buildAbsoluteUrl(path: string, baseUrl: string): string {
+  if (!path) return '';
+  if (path.startsWith('http://') || path.startsWith('https://')) return path;
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+  return `${baseUrl}${normalized}`;
+}
+
+export type SlashCommandCtx = {
+  accountId: number;
+  // Absolute URL of the server (e.g. https://hq.bouldhq.com). The expander
+  // uses this to build absolute logo URLs so the report HTML works whether
+  // the file is previewed in-app, downloaded, or shared.
+  baseUrl: string;
+};
+
 export type SlashCommand = {
   name: string;
   aliases?: string[];
   summary: string;
   usage: string;
   example?: string;
-  expand: (rest: string) => string;
+  expand: (rest: string, ctx: SlashCommandCtx) => Promise<string> | string;
 };
 
 export const SLASH_COMMANDS: SlashCommand[] = [
@@ -21,23 +42,59 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     summary: 'Generate a weekly HTML report for a store and save it to Resources.',
     usage: '/report <store>',
     example: '/report joon',
-    expand: (rest) => {
+    expand: async (rest, ctx) => {
       const store = rest.trim();
       const today = new Date().toISOString().slice(0, 10);
       if (!store) {
         return 'The user typed `/report` without a store name. Ask them which store you should report on, then list the available stores via bouldhq-list-stores.';
       }
+
+      // Resolve the store and its profile (logo + url) so we can hand the
+      // model exact URLs to drop into the report HTML.
+      const tag = await prisma.tag.findFirst({
+        where: {
+          name: { equals: store, mode: 'insensitive' },
+          parent: 0,
+          archivedAt: null,
+        },
+        select: { id: true, name: true },
+      });
+      let storeLogoUrl = '';
+      let storeUrl = '';
+      let canonicalName = store;
+      if (tag) {
+        canonicalName = tag.name;
+        const profile = await prisma.storeProfile.findUnique({
+          where: { tagId: tag.id },
+          select: { logoPath: true, storeUrl: true },
+        });
+        if (profile?.logoPath) storeLogoUrl = buildAbsoluteUrl(profile.logoPath, ctx.baseUrl);
+        if (profile?.storeUrl) storeUrl = profile.storeUrl;
+      }
+      const bouldhqLogoUrl = buildAbsoluteUrl(BOULDHQ_LOGO_PATH, ctx.baseUrl);
+
+      const slug = canonicalName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
       return (
-        `Generate a weekly HTML report for the store "${store}". ` +
-        `Use the BouldHQ report template from your instructions (brand-aware CSS vars, ` +
-        `sections: Executive Summary, Wins, Issues Fixed, Revenue Opportunities, Metrics, Next Week). ` +
-        `Fill the sections with what you know — be explicit when something is a placeholder ` +
-        `pending real Shopify/analytics data. ` +
-        `Then save it via bouldhq-create-resource-file with: ` +
-        `filename="${store.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${today}.html", ` +
-        `folderPath="Branding Assets,${store},Reports", ` +
+        `Generate a weekly HTML report for the store "${canonicalName}". ` +
+        `Use the BouldHQ report template from your instructions. ` +
+        `\n\nUse THESE EXACT values when filling the template:\n` +
+        `  • {{STORE}} = "${canonicalName}"\n` +
+        `  • {{DATE}} = "${today}"\n` +
+        `  • {{BOULDHQ_LOGO_URL}} = "${bouldhqLogoUrl}"\n` +
+        `  • {{STORE_LOGO_URL}} = ${storeLogoUrl ? `"${storeLogoUrl}"` : '""  (no store logo on file — omit the store-logo <img> entirely, fall back to the store name pill)'}\n` +
+        `  • {{STORE_URL}} = ${storeUrl ? `"${storeUrl}"` : '""  (no URL on file — omit the meta link)'}\n` +
+        `  • {{STORE_URL_DISPLAY}} = ${storeUrl ? `"${storeUrl.replace(/^https?:\\/\\//, '')}"` : '""'}\n` +
+        `  • {{TIMESTAMP}} = "${new Date().toISOString()}"\n\n` +
+        `Use the {{BOULDHQ_LOGO_URL}} value INSIDE the header <img class="bouldhq-mark" src="..."> AND inside the footer mark. ` +
+        `Use {{STORE_LOGO_URL}} for the header store mark <img class="store-mark"> if it's set; if it's empty, fall back to the "store" pill with the store name. ` +
+        `\nFill report sections with what you know — for missing analytics use the placeholder span. ` +
+        `Never invent numbers. Keep bullet lists to 3–6 items each.\n\n` +
+        `Then save the document via bouldhq-create-resource-file with: ` +
+        `filename="${slug}-${today}.html", ` +
+        `folderPath="Branding Assets,${canonicalName},Reports", ` +
         `mimeType="text/html". ` +
-        `Finally reply with the resource path and a one-paragraph summary of what's in the report.`
+        `\nFinally reply to me with the resource path and a 1–2 sentence summary of what's in the report.`
       );
     },
   },
@@ -86,14 +143,15 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   },
 ];
 
-export function expandSlashCommand(message: string): string {
+export async function expandSlashCommand(message: string, ctx: SlashCommandCtx): Promise<string> {
   const m = message.match(/^\/(\w+)\s*([\s\S]*)$/);
   if (!m) return message;
   const [, name, rest] = m;
   const cmd = SLASH_COMMANDS.find(
     (c) => c.name === name || (c.aliases && c.aliases.includes(name)),
   );
-  return cmd ? cmd.expand(rest) : message;
+  if (!cmd) return message;
+  return await Promise.resolve(cmd.expand(rest, ctx));
 }
 
 // Plain text for the system prompt — keeps the assistant aware of what
