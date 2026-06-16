@@ -11,11 +11,13 @@ import { api } from '@/lib/trpc';
 // browse / resume / delete past chats.
 
 type Turn =
-  | { kind: 'user'; text: string }
+  | { kind: 'user'; text: string; images?: string[] }
   | { kind: 'assistant'; text: string; toolCalls: ToolCall[] }
   | { kind: 'error'; text: string };
 
 type ToolCall = { tool: string; args?: any };
+
+type PendingImage = { id: string; dataUrl: string; mimeType: string };
 
 type HistoryRow = {
   id: number;
@@ -23,6 +25,9 @@ type HistoryRow = {
   updatedAt: string | Date;
   messageCount: number;
 };
+
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB per image
+const MAX_PENDING_IMAGES = 6;
 
 const EXAMPLES: { icon: string; title: string; prompt: string }[] = [
   {
@@ -44,9 +49,13 @@ const EXAMPLES: { icon: string; title: string; prompt: string }[] = [
 
 const TOOL_LABEL: Record<string, { icon: string; label: string }> = {
   'bouldhq-find-resource':           { icon: 'tabler:folder-search',  label: 'searched resources' },
+  'bouldhq-list-folders':            { icon: 'tabler:folders',        label: 'listed folders' },
   'bouldhq-list-stores':             { icon: 'tabler:building-store', label: 'listed stores' },
   'bouldhq-create-task-for-manager': { icon: 'tabler:flame',          label: 'opened request' },
   'bouldhq-create-resource-file':    { icon: 'tabler:file-plus',      label: 'created resource file' },
+  'bouldhq-delete-resource':         { icon: 'tabler:trash',          label: 'deleted resource' },
+  'bouldhq-move-resource':           { icon: 'tabler:arrows-move',    label: 'moved resource' },
+  'bouldhq-rename-resource':         { icon: 'tabler:edit',           label: 'renamed resource' },
   'search-blinko-tool':              { icon: 'tabler:notes',          label: 'searched notes' },
 };
 
@@ -72,6 +81,9 @@ const AssistantPage = observer(() => {
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -105,7 +117,67 @@ const AssistantPage = observer(() => {
     setTurns([]);
     setConversationId(null);
     setInput('');
+    setPendingImages([]);
   };
+
+  // ---- Image attachment helpers --------------------------------------------
+
+  const fileToDataUrl = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+
+  const addImageFiles = useCallback(async (files: FileList | File[]) => {
+    const incoming = Array.from(files).filter((f) => f.type.startsWith('image/'));
+    if (incoming.length === 0) return;
+    const accepted: PendingImage[] = [];
+    for (const file of incoming) {
+      if (file.size > MAX_IMAGE_BYTES) {
+        setTurns((prev) => [...prev, { kind: 'error', text: `"${file.name}" is over 5MB — skipping.` }]);
+        continue;
+      }
+      try {
+        const dataUrl = await fileToDataUrl(file);
+        accepted.push({
+          id: `${file.name}-${file.lastModified}-${Math.random().toString(36).slice(2, 7)}`,
+          dataUrl,
+          mimeType: file.type || 'image/png',
+        });
+      } catch {
+        setTurns((prev) => [...prev, { kind: 'error', text: `Couldn't read "${file.name}".` }]);
+      }
+    }
+    setPendingImages((prev) => {
+      const next = [...prev, ...accepted];
+      return next.slice(0, MAX_PENDING_IMAGES);
+    });
+  }, []);
+
+  const removePendingImage = (id: string) => {
+    setPendingImages((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  const onPaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const files: File[] = [];
+      for (const item of items) {
+        if (item.kind === 'file') {
+          const f = item.getAsFile();
+          if (f) files.push(f);
+        }
+      }
+      if (files.length > 0) {
+        e.preventDefault();
+        addImageFiles(files);
+      }
+    },
+    [addImageFiles],
+  );
 
   const loadConversation = async (id: number) => {
     setHistoryOpen(false);
@@ -139,17 +211,19 @@ const AssistantPage = observer(() => {
 
   const send = async (text?: string) => {
     const msg = (text ?? input).trim();
-    if (!msg || busy) return;
+    const hasImages = pendingImages.length > 0;
+    if ((!msg && !hasImages) || busy) return;
     if (ccConfigured === false) {
       setTurns((prev) => [
         ...prev,
-        { kind: 'user', text: msg },
+        { kind: 'user', text: msg || '(image)' },
         {
           kind: 'error',
           text: "AI isn't connected yet. Ask the owner to run `claude setup-token` on the server and set CLAUDE_CODE_OAUTH_TOKEN.",
         },
       ]);
       setInput('');
+      setPendingImages([]);
       return;
     }
     setBusy(true);
@@ -160,14 +234,22 @@ const AssistantPage = observer(() => {
       return [];
     });
 
-    setTurns((prev) => [...prev, { kind: 'user', text: msg }]);
+    const imagesForApi = pendingImages.map((p) => ({ dataUrl: p.dataUrl, mimeType: p.mimeType }));
+    const userTurn: Turn = {
+      kind: 'user',
+      text: msg || (hasImages ? `(${pendingImages.length} image${pendingImages.length === 1 ? '' : 's'})` : ''),
+      images: hasImages ? pendingImages.map((p) => p.dataUrl) : undefined,
+    };
+    setTurns((prev) => [...prev, userTurn]);
     setInput('');
+    setPendingImages([]);
 
     try {
       const res = await api.ai.assistantChat.mutate({
-        message: msg,
+        message: msg || 'Please review the attached image(s) and tell me what you see.',
         history,
         conversationId: conversationId ?? undefined,
+        images: imagesForApi,
       });
       setTurns((prev) => [...prev, {
         kind: 'assistant',
@@ -177,7 +259,6 @@ const AssistantPage = observer(() => {
       if (res.conversationId && res.conversationId !== conversationId) {
         setConversationId(res.conversationId);
       }
-      // Refresh sidebar so the new/updated convo bubbles to the top.
       refreshHistory();
     } catch (e: any) {
       setTurns((prev) => [...prev, { kind: 'error', text: e?.message ?? 'Request failed' }]);
@@ -369,8 +450,24 @@ const AssistantPage = observer(() => {
             if (t.kind === 'user') {
               return (
                 <article key={i} className="flex justify-end">
-                  <div className="rounded-2xl rounded-br-md bg-primary text-primary-foreground px-4 py-2 text-sm max-w-[85%] whitespace-pre-wrap break-words">
-                    {t.text}
+                  <div className="flex flex-col items-end gap-1.5 max-w-[85%]">
+                    {t.images && t.images.length > 0 && (
+                      <div className={`grid gap-1.5 ${t.images.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                        {t.images.map((src, j) => (
+                          <img
+                            key={j}
+                            src={src}
+                            alt={`attachment ${j + 1}`}
+                            className="rounded-lg max-h-56 object-cover border border-divider"
+                          />
+                        ))}
+                      </div>
+                    )}
+                    {t.text && (
+                      <div className="rounded-2xl rounded-br-md bg-primary text-primary-foreground px-4 py-2 text-sm whitespace-pre-wrap break-words">
+                        {t.text}
+                      </div>
+                    )}
                   </div>
                 </article>
               );
@@ -418,14 +515,88 @@ const AssistantPage = observer(() => {
         </div>
       </ScrollArea>
 
-      <footer className="border-t border-divider px-4 md:px-8 py-3 bg-content1">
+      <footer
+        className={`border-t border-divider px-4 md:px-8 py-3 bg-content1 relative ${isDragging ? 'ring-2 ring-primary ring-inset' : ''}`}
+        onDragOver={(e) => {
+          if (e.dataTransfer?.types.includes('Files')) {
+            e.preventDefault();
+            setIsDragging(true);
+          }
+        }}
+        onDragLeave={() => setIsDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setIsDragging(false);
+          if (e.dataTransfer.files?.length) addImageFiles(e.dataTransfer.files);
+        }}
+      >
+        {isDragging && (
+          <div className="absolute inset-0 bg-primary/5 flex items-center justify-center pointer-events-none text-xs text-primary font-medium">
+            Drop images to attach
+          </div>
+        )}
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files) addImageFiles(e.target.files);
+            e.target.value = '';
+          }}
+        />
+
+        {pendingImages.length > 0 && (
+          <div className="max-w-3xl mx-auto mb-2 flex flex-wrap gap-2">
+            {pendingImages.map((p) => (
+              <div key={p.id} className="relative group">
+                <img src={p.dataUrl} alt="attachment" className="h-16 w-16 object-cover rounded-lg border border-divider" />
+                <button
+                  type="button"
+                  onClick={() => removePendingImage(p.id)}
+                  className="absolute -top-1.5 -right-1.5 bg-default-900 text-default-50 rounded-full w-5 h-5 flex items-center justify-center opacity-90 hover:opacity-100"
+                  aria-label="Remove image"
+                >
+                  <Icon icon="tabler:x" width={11} height={11} />
+                </button>
+              </div>
+            ))}
+            {pendingImages.length < MAX_PENDING_IMAGES && (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="h-16 w-16 rounded-lg border border-dashed border-divider text-default-400 hover:text-primary hover:border-primary flex items-center justify-center"
+                aria-label="Add another image"
+              >
+                <Icon icon="tabler:plus" width={18} height={18} />
+              </button>
+            )}
+          </div>
+        )}
+
         <div className="max-w-3xl mx-auto flex items-end gap-2">
+          <Tooltip content="Attach image (or paste / drag-and-drop)" placement="top">
+            <Button
+              size="sm"
+              variant="flat"
+              isIconOnly
+              onPress={() => fileInputRef.current?.click()}
+              isDisabled={pendingImages.length >= MAX_PENDING_IMAGES}
+              aria-label="Attach image"
+              className="mb-0.5"
+            >
+              <Icon icon="tabler:paperclip" width={16} height={16} />
+            </Button>
+          </Tooltip>
           <Textarea
             minRows={1}
             maxRows={6}
             value={input}
             placeholder={hasMessages ? 'Continue the conversation…' : 'Ask the assistant…'}
             onChange={(e) => setInput(e.target.value)}
+            onPaste={onPaste}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -438,7 +609,7 @@ const AssistantPage = observer(() => {
             color="primary"
             isIconOnly
             isLoading={busy}
-            isDisabled={!input.trim()}
+            isDisabled={!input.trim() && pendingImages.length === 0}
             onPress={() => send()}
             aria-label="Send"
           >
@@ -446,7 +617,7 @@ const AssistantPage = observer(() => {
           </Button>
         </div>
         <div className="max-w-3xl mx-auto text-[10px] text-default-400 mt-1.5 text-center">
-          Press <kbd className="font-mono">Enter</kbd> to send · <kbd className="font-mono">Shift+Enter</kbd> for newline
+          Press <kbd className="font-mono">Enter</kbd> to send · <kbd className="font-mono">Shift+Enter</kbd> newline · paste or drag to attach
         </div>
       </footer>
     </div>

@@ -378,7 +378,25 @@ Operating rules:
 SLASH COMMANDS the user may type (already expanded by the server before you see the message — but here's what they mean):
 ${slashCommandsForPrompt()}
 
-HTML REPORT TEMPLATE — when /report fires, produce a self-contained HTML document using this skeleton. Brand variables at the top so the team can override per store. Inline CSS only. Do not link external stylesheets.
+HTML REPORT TEMPLATE — when /report fires, produce a SELF-CONTAINED HTML document using this exact skeleton. Inline CSS only. No external stylesheets, no external scripts.
+
+BRAND PALETTE (use the CSS variables, do not hardcode hex values elsewhere):
+  • --brand-primary  #2B3674   navy — primary text + headings
+  • --brand-accent   #8B5CF6   BouldHQ violet — pills, links, hairline accents
+  • --brand-success  #05CD99   green — positive metric deltas, "on track" status
+  • --bg             #F4F7FE   page background (subtle lavender)
+  • --surface        #FFFFFF   card background
+  • --border         #E6DDFE   soft lavender card border
+  • --text           #0F0F19   body text
+  • --muted          #6B7280   secondary text
+  • --hairline       #E5E7EB   subtle dividers
+
+HEADER must be co-branded:
+  [BouldHQ logo mark] × [STORE NAME]
+  with a tiny meta row underneath: store URL + week-of date.
+  Use the inline SVG bolt mark below for the BouldHQ logo. Do NOT swap it for an emoji.
+
+Skeleton (replace every {{TOKEN}}; never invent metrics — for missing data write <em class="placeholder">Awaiting Shopify analytics integration</em>; keep bullet lists to 3–6 items each):
 
 <!doctype html>
 <html lang="en">
@@ -387,79 +405,186 @@ HTML REPORT TEMPLATE — when /report fires, produce a self-contained HTML docum
 <title>{{STORE}} — Weekly Report — {{DATE}}</title>
 <style>
   :root {
-    --brand-primary: #111;
-    --brand-accent: #e85d2c;   /* override per store later */
-    --bg: #fafafa;
-    --fg: #111;
-    --muted: #666;
-    --border: #e5e5e5;
-    --radius: 12px;
-    --maxw: 880px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif;
+    --brand-primary: #2B3674;
+    --brand-accent:  #8B5CF6;
+    --brand-success: #05CD99;
+    --bg:            #F4F7FE;
+    --surface:       #FFFFFF;
+    --border:        #E6DDFE;
+    --text:          #0F0F19;
+    --muted:         #6B7280;
+    --hairline:      #E5E7EB;
+    --radius:        14px;
+    --maxw:          920px;
   }
-  body { margin: 0; background: var(--bg); color: var(--fg); }
-  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 48px 24px; }
-  header { display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border); padding-bottom:24px; margin-bottom:32px; }
-  header .brand { font-weight: 700; letter-spacing:-0.02em; font-size:24px; color:var(--brand-primary); }
-  header .meta { color: var(--muted); font-size: 13px; text-align:right; }
-  h1 { font-size: 32px; letter-spacing:-0.02em; margin: 0 0 8px; }
-  h2 { font-size: 18px; margin: 36px 0 12px; color: var(--brand-primary); }
-  section { background:#fff; border:1px solid var(--border); border-radius:var(--radius); padding:20px 24px; margin-bottom:16px; }
-  .pill { display:inline-block; padding:2px 10px; border-radius:999px; background:var(--brand-accent); color:#fff; font-size:12px; font-weight:600; }
-  ul { padding-left: 20px; }
-  li { margin: 6px 0; line-height:1.5; }
-  .metric { display:inline-block; min-width:160px; margin:8px 16px 8px 0; }
-  .metric .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:0.04em; }
-  .metric .value { font-size:26px; font-weight:700; letter-spacing:-0.01em; }
-  footer { color: var(--muted); font-size:12px; text-align:center; margin-top:32px; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font-family: -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif;
+         font-feature-settings: 'cv11', 'ss01';
+         -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 56px 28px 80px; }
+
+  /* --- Co-branded header --- */
+  header.cobrand {
+    display: flex; align-items: center; justify-content: space-between;
+    padding-bottom: 28px; margin-bottom: 40px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .cobrand-marks {
+    display: flex; align-items: center; gap: 14px;
+    font-weight: 700; font-size: 22px; letter-spacing: -0.02em;
+    color: var(--brand-primary);
+  }
+  .cobrand-marks .bouldhq {
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .cobrand-marks .bouldhq svg { color: var(--brand-accent); }
+  .cobrand-marks .x {
+    color: var(--muted); font-weight: 400; font-size: 18px;
+    transform: translateY(-1px);
+  }
+  .cobrand-marks .store {
+    color: var(--brand-primary);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    padding: 4px 12px; border-radius: 999px;
+    font-size: 18px;
+  }
+  header .meta { color: var(--muted); font-size: 12.5px; text-align: right; line-height: 1.55; }
+  header .meta a { color: var(--brand-accent); text-decoration: none; }
+
+  /* --- Title block --- */
+  .title { margin-bottom: 28px; }
+  h1 { font-size: 34px; letter-spacing: -0.025em; margin: 0 0 10px; color: var(--text); }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 12px; border-radius: 999px;
+    background: rgba(139, 92, 246, 0.12); color: var(--brand-accent);
+    font-size: 12px; font-weight: 600; letter-spacing: 0.01em;
+  }
+  .pill.success { background: rgba(5, 205, 153, 0.14); color: var(--brand-success); }
+
+  /* --- Cards --- */
+  section.card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 22px 26px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 2px rgba(43, 54, 116, 0.04);
+  }
+  section.card h2 {
+    font-size: 16px; font-weight: 700; margin: 0 0 14px;
+    color: var(--brand-primary);
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  section.card p { line-height: 1.65; margin: 0 0 10px; }
+  ul { padding-left: 18px; margin: 0; }
+  li { margin: 8px 0; line-height: 1.6; }
+  li::marker { color: var(--brand-accent); }
+
+  /* --- Metrics grid --- */
+  .metrics {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 14px; margin-top: 4px;
+  }
+  .metric {
+    padding: 14px 16px; border-radius: 10px;
+    background: var(--bg); border: 1px solid var(--hairline);
+  }
+  .metric .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+  .metric .value { font-size: 24px; font-weight: 700; letter-spacing: -0.01em; margin-top: 4px; color: var(--text); }
+  .metric .delta { font-size: 12px; font-weight: 600; margin-top: 2px; }
+  .metric .delta.up { color: var(--brand-success); }
+  .metric .delta.down { color: #DC2626; }
+
+  /* --- Misc --- */
+  .placeholder { color: var(--muted); font-style: italic; }
+  footer {
+    text-align: center; color: var(--muted); font-size: 11.5px;
+    margin-top: 48px; padding-top: 20px;
+    border-top: 1px solid var(--hairline);
+  }
+  footer .footer-mark { display: inline-flex; align-items: center; gap: 6px; color: var(--brand-primary); font-weight: 600; }
+  footer .footer-mark svg { color: var(--brand-accent); }
 </style>
 </head>
 <body>
   <div class="wrap">
-    <header>
-      <div class="brand">BouldHQ</div>
-      <div class="meta">{{STORE}} · Week of {{DATE}}</div>
+
+    <header class="cobrand">
+      <div class="cobrand-marks">
+        <span class="bouldhq">
+          <!-- BouldHQ bolt mark — use this exact SVG -->
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/>
+          </svg>
+          BouldHQ
+        </span>
+        <span class="x">×</span>
+        <span class="store">{{STORE}}</span>
+      </div>
+      <div class="meta">
+        Week of {{DATE}}<br/>
+        <a href="{{STORE_URL}}">{{STORE_URL_DISPLAY}}</a>
+      </div>
     </header>
 
-    <h1>{{STORE}} — Weekly Report</h1>
-    <span class="pill">Status: {{STATUS}}</span>
+    <div class="title">
+      <h1>Weekly Report</h1>
+      <span class="pill {{STATUS_CLASS}}">{{STATUS_LABEL}}</span>
+    </div>
 
-    <section>
+    <section class="card">
       <h2>Executive Summary</h2>
       <p>{{EXEC_SUMMARY}}</p>
     </section>
 
-    <section>
+    <section class="card">
       <h2>Wins This Week</h2>
       <ul>{{WINS_LIST}}</ul>
     </section>
 
-    <section>
+    <section class="card">
       <h2>Issues Fixed</h2>
       <ul>{{ISSUES_LIST}}</ul>
     </section>
 
-    <section>
+    <section class="card">
       <h2>Revenue Opportunities</h2>
       <ul>{{OPPORTUNITIES_LIST}}</ul>
     </section>
 
-    <section>
+    <section class="card">
       <h2>Metrics</h2>
-      {{METRICS_BLOCK}}
+      <div class="metrics">{{METRICS_GRID}}</div>
     </section>
 
-    <section>
+    <section class="card">
       <h2>Next Week Roadmap</h2>
       <ul>{{ROADMAP_LIST}}</ul>
     </section>
 
-    <footer>Generated by BouldHQ on {{TIMESTAMP}}</footer>
+    <footer>
+      <span class="footer-mark">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/>
+        </svg>
+        BouldHQ
+      </span>
+      &nbsp;·&nbsp; Generated {{TIMESTAMP}}
+    </footer>
+
   </div>
 </body>
 </html>
 
-Replace every {{TOKEN}} with real content. If real Shopify/analytics data isn't available, write a clearly-marked placeholder like "<i>Awaiting Shopify analytics integration</i>" — never invent numbers. Keep bullet lists to 3–6 items each.`;
+Notes for filling the template:
+  • STATUS_CLASS = "success" when status is healthy/on-track, otherwise omit the class.
+  • STATUS_LABEL examples: "On Track", "Needs Attention", "At Risk".
+  • Each METRIC inside METRICS_GRID is: <div class="metric"><div class="label">Revenue</div><div class="value">$12,480</div><div class="delta up">+8.2% WoW</div></div>
+  • If you don't know STORE_URL, omit the meta block entirely (don't show a broken link).
+  • Never invent numbers. Use the placeholder span for missing analytics.`;
 
     return createClaudeCodeAgent({
       name: 'BouldHQ Assistant',

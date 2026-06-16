@@ -91,6 +91,14 @@ export const aiRouter = router({
         content: z.string(),
       })).default([]),
       conversationId: z.number().optional(),
+      // Optional images attached to THIS turn. Each is a data URL
+      // ("data:image/png;base64,...") under ~5MB. Not persisted to history
+      // (keeps DB small + retains privacy by default); only used for the
+      // current model call.
+      images: z.array(z.object({
+        dataUrl: z.string(),
+        mimeType: z.string().optional(),
+      })).default([]),
     }))
     .mutation(async ({ input, ctx }) => {
       try {
@@ -125,13 +133,30 @@ export const aiRouter = router({
           isNewConversation = true;
         }
 
+        // Build the conversation. If images were attached this turn, the
+        // current user message becomes a content-block array (image blocks
+        // + text) so claudeCodeAgent's vision path picks it up.
+        const currentTurn = input.images.length > 0
+          ? {
+              role: 'user' as const,
+              content: [
+                ...input.images.map((img) => ({
+                  type: 'image' as const,
+                  image: img.dataUrl,
+                  mimeType: img.mimeType,
+                })),
+                { type: 'text' as const, text: effectiveMessage },
+              ],
+            }
+          : { role: 'user' as const, content: effectiveMessage };
+
         const messages = [
           ...input.history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-          { role: 'user' as const, content: effectiveMessage },
+          currentTurn,
         ];
         const runtimeContext = new RuntimeContext();
         runtimeContext.set('accountId', accountId);
-        const result = await agent.generate(messages, { runtimeContext });
+        const result = await agent.generate(messages as any, { runtimeContext });
 
         const toolCalls = (result.toolCalls ?? []).map((tc: any) => ({
           tool: tc.toolName,
@@ -143,13 +168,19 @@ export const aiRouter = router({
         }));
 
         // Persist both turns. Store the ORIGINAL user message (pre-expansion)
-        // so the history list reads the way the user typed it.
+        // so the history list reads the way the user typed it. Image
+        // attachments are intentionally NOT persisted — they live only in
+        // the current turn. The message metadata records how many images
+        // were attached so the UI can show a placeholder.
         await prisma.message.create({
           data: {
             conversationId,
             role: 'user',
             content: input.message,
-            metadata: { kind: 'assistant' },
+            metadata: {
+              kind: 'assistant',
+              ...(input.images.length > 0 ? { imageCount: input.images.length } : {}),
+            },
           },
         });
         await prisma.message.create({
