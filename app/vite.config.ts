@@ -144,6 +144,24 @@ export default defineConfig({
     // esbuild's downleveling of e.g. lru-cache@11's pre-minified ESM breaks
     // class constructors → "Object is not a constructor (new Whr)" at boot.
     target: 'es2022',
+    sourcemap: true,
+    // esbuild's class minification rewrote a singleton's class as `{}` and
+    // crashed with "Object is not a constructor". Use terser instead, which
+    // doesn't perform that optimization.
+    minify: 'terser',
+    terserOptions: {
+      compress: {
+        // Be conservative — don't strip what looks like dead code.
+        // Specifically, preserve class declarations even if their bodies
+        // look unused.
+        keep_classnames: true,
+        keep_fnames: true,
+      },
+      mangle: {
+        keep_classnames: true,
+        keep_fnames: true,
+      },
+    },
     rollupOptions: {
       output: {
         // Keep the chunks Rollup picks. A previous `ui-components` manual
