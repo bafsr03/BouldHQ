@@ -13,9 +13,20 @@ export class BaseStore implements Store {
   }
   routerList = [
     {
+      title: 'hq',
+      href: '/hq',
+      icon: 'tabler:speakerphone',
+    },
+    {
+      title: 'stores',
+      href: '/stores',
+      icon: 'tabler:building-store',
+    },
+    {
       title: 'blinko',
       href: '/',
       shallow: true,
+      founderOnly: true,
       icon: 'basil:lightning-outline',
       img: '/outlineB.svg',
     },
@@ -32,16 +43,23 @@ export class BaseStore implements Store {
       icon: 'solar:bill-check-linear',
     },
     {
-      title: 'analytics',
-      href: '/analytics',
-      hiddenMobile: true,
-      icon: 'hugeicons:analytics-01',
-    },
-    {
       title: 'resources',
       href: '/resources',
       icon: 'solar:database-linear',
       hiddenMobile: true,
+    },
+    {
+      title: 'ai',
+      href: '/ai',
+      icon: 'hugeicons:ai-magic',
+      hiddenMobile: true,
+    },
+    {
+      title: 'analytics',
+      href: '/analytics',
+      hiddenMobile: true,
+      founderOnly: true,
+      icon: 'hugeicons:analytics-01',
     },
     {
       title: 'archived',

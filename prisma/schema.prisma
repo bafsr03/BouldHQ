@@ -24,6 +24,9 @@ model accounts {
   role          String          @default("") @db.VarChar
   loginType     String          @default("") @db.VarChar
   linkAccountId Int?
+  // BouldHQ — last team this user activated. NULL until they pick one (or stays
+  // NULL forever for single-team users — fall back to "most recent membership").
+  lastActiveTeamId Int?
   createdAt     DateTime        @default(now()) @db.Timestamptz(6)
   updatedAt     DateTime        @updatedAt @db.Timestamptz(6)
   notes         notes[]
@@ -36,6 +39,12 @@ model accounts {
   conversations conversation[]
   sharedNotes   noteInternalShare[]
   aiScheduledTasks aiScheduledTask[]
+  teamMemberships  teamMember[]
+  requestsCreated  storeRequest[] @relation("RequestCreator")
+  requestsAssigned storeRequest[] @relation("RequestAssignee")
+  announcements    announcement[] @relation("AnnouncementAuthor")
+  brandOwner       brandOwner?
+  brandOwnerInvites brandOwner[] @relation("BrandOwnerInviter")
 }
 
 model attachments {
@@ -120,12 +129,102 @@ model tag {
   icon       String       @default("") @db.VarChar
   parent     Int          @default(0)
   accountId  Int?
+  teamId     Int?
+  // BouldHQ — soft-archive for stores. NULL = active. Set when a manager+ archives.
+  archivedAt   DateTime? @db.Timestamptz(6)
+  archivedById Int?
   createdAt  DateTime     @default(now()) @db.Timestamptz(6)
   updatedAt  DateTime     @updatedAt @db.Timestamptz(6)
   tagsToNote tagsToNote[]
   sortOrder  Int          @default(0)
   account    accounts?    @relation(fields: [accountId], references: [id])
-  storeProfile storeProfile?
+  team       team?        @relation(fields: [teamId], references: [id])
+  storeProfile  storeProfile?
+  storeRequests storeRequest[]
+  brandOwner    brandOwner?
+
+  @@index([teamId])
+  @@index([archivedAt])
+}
+
+// BouldHQ — a team is the unit of ownership for stores. Salesmen + 1 manager belong
+// to a team; founders see every team.
+model team {
+  id          Int      @id @default(autoincrement())
+  name        String   @db.VarChar(255)
+  slug        String   @unique @db.VarChar(100)
+  description String?  @db.Text
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
+
+  members       teamMember[]
+  tags          tag[]
+  storeRequests storeRequest[]
+  announcements announcement[]
+}
+
+// BouldHQ — broadcast notices. teamId NULL = global (founder-only).
+// category drives the section it appears in on /hq (announcement, changelog, workflow_update).
+model announcement {
+  id        Int      @id @default(autoincrement())
+  teamId    Int?
+  authorId  Int
+  category  String   @db.VarChar(20)  // 'announcement' | 'changelog' | 'workflow_update'
+  title     String   @db.VarChar(255)
+  body      String   @db.Text
+  pinned    Boolean  @default(false)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+
+  team   team?    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  author accounts @relation("AnnouncementAuthor", fields: [authorId], references: [id])
+
+  @@index([teamId, createdAt])
+  @@index([category, createdAt])
+}
+
+model teamMember {
+  id        Int      @id @default(autoincrement())
+  teamId    Int
+  accountId Int
+  role      String   @db.VarChar(20) // 'founder' | 'manager' | 'salesman'
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+
+  team    team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  account accounts @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, accountId])
+  @@index([accountId])
+}
+
+// BouldHQ — a request submitted by a salesman against a store. AI triages whether
+// it can be auto-handled or needs a human; status drives the badge in the UI.
+model storeRequest {
+  id            Int       @id @default(autoincrement())
+  teamId        Int
+  tagId         Int
+  createdById   Int
+  assigneeId    Int?
+  source        String    @db.VarChar(20)  // 'text' | 'email' | 'screenshot' | 'voice'
+  rawBody       String    @db.Text
+  attachmentIds Int[]
+  triageResult  Json?
+  status        String    @db.VarChar(30)  // pending_triage|auto_running|auto_done|needs_assistance|in_progress|done
+  jobId         String?   @db.VarChar(100)
+  runLog        Json?     // BouldHQ Phase 7 — playbook execution log: { ok, steps[] }
+  managerNotes  String?   @db.Text
+  closedAt      DateTime? @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @db.Timestamptz(6)
+
+  team      team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  tag       tag       @relation(fields: [tagId],  references: [id], onDelete: Cascade)
+  createdBy accounts  @relation("RequestCreator",  fields: [createdById], references: [id])
+  assignee  accounts? @relation("RequestAssignee", fields: [assigneeId],  references: [id])
+
+  @@index([teamId, status])
+  @@index([tagId])
+  @@index([assigneeId])
 }
 
 // BouldHQ — per-tag store metadata. Each client tag (e.g. #novalabel) can have one storeProfile.
@@ -139,6 +238,10 @@ model storeProfile {
   adminUrl         String    @default("") @db.VarChar(500)
   collaboratorCode String    @default("") @db.VarChar(20)
   logoPath         String    @default("") @db.VarChar(500)
+  // BouldHQ ops-console — relative path inside ~/.bouldhq-workdirs/<slug>/ where
+  // the Shopify theme lives. Default 'theme' because that's the common layout.
+  localThemePath   String    @default("theme") @db.VarChar(500)
+  devServerPort    Int       @default(9292)
   renewalDate      DateTime? @db.Timestamptz(6)
   createdAt        DateTime  @default(now()) @db.Timestamptz(6)
   updatedAt        DateTime  @updatedAt @db.Timestamptz(6)
@@ -146,6 +249,41 @@ model storeProfile {
   tag           tag       @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   @@index([accountId])
+}
+
+// BouldHQ — a brand owner is the merchant we manage. They get a magic-link-only
+// view of their own store. One owner per store for v1. The account row carries
+// the auth identity (role='brand_owner'); this table links them to their store
+// and tracks who onboarded them.
+model brandOwner {
+  id          Int      @id @default(autoincrement())
+  accountId   Int      @unique
+  tagId       Int      @unique
+  phone       String?  @db.VarChar(40)
+  invitedById Int
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
+
+  account    accounts @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  tag        tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  invitedBy  accounts @relation("BrandOwnerInviter", fields: [invitedById], references: [id])
+  magicLinks brandOwnerMagicLink[]
+}
+
+// Short-lived (15 min) link tokens. Owner taps the link → we mark usedAt and
+// issue a 30-day session JWT. Tokens are stored hashed; the raw URL is only
+// returned once at creation time.
+model brandOwnerMagicLink {
+  id        Int       @id @default(autoincrement())
+  ownerId   Int
+  tokenHash String    @unique @db.VarChar(128)
+  expiresAt DateTime  @db.Timestamptz(6)
+  usedAt    DateTime? @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @db.Timestamptz(6)
+
+  owner brandOwner @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
 }
 
 model tagsToNote {

@@ -3,9 +3,7 @@ import { upsertBlinkoTool } from './tools/createBlinko';
 import { createCommentTool } from './tools/createComment';
 import { LibSQLVector } from "@mastra/libsql";
 import dayjs from 'dayjs';
-import { Agent, Mastra } from '@mastra/core';
-import { LanguageModelV1, EmbeddingModelV1 } from '@ai-sdk/provider';
-import { MarkdownTextSplitter, TokenTextSplitter } from '@langchain/textsplitters';
+import { EmbeddingModelV1 } from '@ai-sdk/provider';
 import { embed } from 'ai';
 import { _ } from '@shared/lib/lodash';
 import { webSearchTool } from './tools/webSearch';
@@ -14,17 +12,17 @@ import { searchBlinkoTool } from './tools/searchBlinko';
 import { updateBlinkoTool } from './tools/updateBlinko';
 import { deleteBlinkoTool } from './tools/deleteBlinko';
 import { createScheduledTaskTool, deleteScheduledTaskTool, listScheduledTasksTool } from './tools/scheduledTask';
+import { findResourceTool, listStoresTool, createTaskForManagerTool } from './tools/bouldHqAssistant';
+import { createResourceFileTool } from './tools/createResourceFile';
 import { getMcpMastraTools, hasMcpServers } from './mcp';
-import { rerank } from '@mastra/rag';
+import { slashCommandsForPrompt } from './slashCommands';
 import { prisma } from '@server/prisma';
 import { getGlobalConfig } from '@server/routerTrpc/config';
 import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
-import { PinoLogger } from '@mastra/loggers';
-import { ModelCapabilities } from './types';
-import { aiModels } from '@shared/index';
 import { MastraVoice } from '@mastra/core/voice';
+import { createClaudeCodeAgent } from './claudeCodeAgent';
 
 export class AiModelFactory {
   static async queryAndDeleteVectorById(targetId: number) {
@@ -236,23 +234,19 @@ export class AiModelFactory {
   }
 
 
+  // Kept for legacy callers. Chat is now served by Claude Code, so a configured
+  // main model is no longer required — only embedding/audio/image setups need
+  // their respective providers.
   static async ValidConfig() {
-    const globalConfig = await AiModelFactory.globalConfig();
-    if (!globalConfig.mainModelId) {
-      throw new Error('Main AI model not configured!');
-    }
     return await AiModelFactory.globalConfig();
   }
 
   static async GetProvider() {
-    const globalConfig = await AiModelFactory.ValidConfig();
-    if (!globalConfig.mainModelId) {
-      throw new Error('Main AI model configuration not found!');
-    }
-    const mainModel = await AiModelFactory.getAiModel(globalConfig.mainModelId);
-    if (!mainModel) {
-      throw new Error('Main AI model configuration not found!');
-    }
+    const globalConfig = await AiModelFactory.globalConfig();
+
+    const mainModel = globalConfig.mainModelId
+      ? await AiModelFactory.getAiModel(globalConfig.mainModelId)
+      : null;
 
     const embeddingModel = globalConfig.embeddingModelId
       ? await AiModelFactory.getAiModel(globalConfig.embeddingModelId)
@@ -271,17 +265,20 @@ export class AiModelFactory {
     const embeddingProvider = new EmbeddingProvider();
     const audioProvider = new AudioProvider();
 
-    // Create LLM configuration
-    const llmConfig = {
-      provider: mainModel.provider.provider,
-      apiKey: mainModel.provider.apiKey,
-      baseURL: mainModel.provider.baseURL,
-      modelKey: mainModel.modelKey,
-      apiVersion: (mainModel.provider.config as any)?.apiVersion
-    };
-
-    // Get LLM instance
-    const llm = await llmProvider.getLanguageModel(llmConfig);
+    // Get LLM instance only if a legacy chat model is still configured.
+    // Claude Code handles chat now; this is preserved for any non-chat callers
+    // that still reference provider.LLM.
+    let llm: any = null;
+    if (mainModel) {
+      const llmConfig = {
+        provider: mainModel.provider.provider,
+        apiKey: mainModel.provider.apiKey,
+        baseURL: mainModel.provider.baseURL,
+        modelKey: mainModel.modelKey,
+        apiVersion: (mainModel.provider.config as any)?.apiVersion,
+      };
+      llm = await llmProvider.getLanguageModel(llmConfig);
+    }
 
     // Get Embedding instance (if configured)
     let embeddings: EmbeddingModelV1<string> | null = null;
@@ -329,29 +326,151 @@ export class AiModelFactory {
       }
     };
   }
+  // BouldHQ assistant — scoped agent for the /ai page. Three jobs:
+  //   1. Explain how the BouldHQ app/workflow works.
+  //   2. Find a saved resource or note the user can't remember where they put.
+  //   3. Open a task (storeRequest) against a specific store for the agent manager.
+  // Deliberately narrow tool set — no webSearch, no upsert/delete of notes.
+  static async BouldHqAssistantAgent() {
+    const instructions =
+`Today is ${dayjs().format('YYYY-MM-DD HH:mm:ss')}
+You are the BouldHQ Ops Assistant. BouldHQ is an AI-powered ops platform for managing Shopify stores. Roles:
+  • founder — sees everything across all teams.
+  • manager — runs the agent workspace and triages requests against the team's stores.
+  • salesman — onboards new store owners and submits requests on their behalf.
+
+You have tools available. ALWAYS use them when applicable:
+  • bouldhq-find-resource          — search the team's Resources panel (SOPs, branding files, etc.)
+  • bouldhq-list-stores            — list the team's stores (returns tagId + name)
+  • bouldhq-create-task-for-manager — open a task/request for a store
+  • bouldhq-create-resource-file   — save a new HTML / Markdown / text file into Resources
+  • search-blinko-tool             — semantic search across the team's notes
+
+Operating rules:
+  • When tools exist for what the user wants, USE THEM. Don't tell the user to go look it up themselves if you can call a tool to do it.
+  • When opening a task, pass the user's wording verbatim into the body. Do not paraphrase.
+  • Resolve a store name to its tagId via bouldhq-list-stores before calling tools that need it.
+  • When generating documents (reports, manuals, briefs), save them to Resources with bouldhq-create-resource-file instead of dumping the whole document into chat. Reply with the saved path + a short summary.
+  • You can answer general questions (date, planning, how the app works) and generate any content the user asks for. Stay biased toward BouldHQ ops tasks.
+  • Always respond in the user's language. Keep responses tight.
+
+SLASH COMMANDS the user may type (already expanded by the server before you see the message — but here's what they mean):
+${slashCommandsForPrompt()}
+
+HTML REPORT TEMPLATE — when /report fires, produce a self-contained HTML document using this skeleton. Brand variables at the top so the team can override per store. Inline CSS only. Do not link external stylesheets.
+
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>{{STORE}} — Weekly Report — {{DATE}}</title>
+<style>
+  :root {
+    --brand-primary: #111;
+    --brand-accent: #e85d2c;   /* override per store later */
+    --bg: #fafafa;
+    --fg: #111;
+    --muted: #666;
+    --border: #e5e5e5;
+    --radius: 12px;
+    --maxw: 880px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif;
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg); }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 48px 24px; }
+  header { display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border); padding-bottom:24px; margin-bottom:32px; }
+  header .brand { font-weight: 700; letter-spacing:-0.02em; font-size:24px; color:var(--brand-primary); }
+  header .meta { color: var(--muted); font-size: 13px; text-align:right; }
+  h1 { font-size: 32px; letter-spacing:-0.02em; margin: 0 0 8px; }
+  h2 { font-size: 18px; margin: 36px 0 12px; color: var(--brand-primary); }
+  section { background:#fff; border:1px solid var(--border); border-radius:var(--radius); padding:20px 24px; margin-bottom:16px; }
+  .pill { display:inline-block; padding:2px 10px; border-radius:999px; background:var(--brand-accent); color:#fff; font-size:12px; font-weight:600; }
+  ul { padding-left: 20px; }
+  li { margin: 6px 0; line-height:1.5; }
+  .metric { display:inline-block; min-width:160px; margin:8px 16px 8px 0; }
+  .metric .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:0.04em; }
+  .metric .value { font-size:26px; font-weight:700; letter-spacing:-0.01em; }
+  footer { color: var(--muted); font-size:12px; text-align:center; margin-top:32px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">BouldHQ</div>
+      <div class="meta">{{STORE}} · Week of {{DATE}}</div>
+    </header>
+
+    <h1>{{STORE}} — Weekly Report</h1>
+    <span class="pill">Status: {{STATUS}}</span>
+
+    <section>
+      <h2>Executive Summary</h2>
+      <p>{{EXEC_SUMMARY}}</p>
+    </section>
+
+    <section>
+      <h2>Wins This Week</h2>
+      <ul>{{WINS_LIST}}</ul>
+    </section>
+
+    <section>
+      <h2>Issues Fixed</h2>
+      <ul>{{ISSUES_LIST}}</ul>
+    </section>
+
+    <section>
+      <h2>Revenue Opportunities</h2>
+      <ul>{{OPPORTUNITIES_LIST}}</ul>
+    </section>
+
+    <section>
+      <h2>Metrics</h2>
+      {{METRICS_BLOCK}}
+    </section>
+
+    <section>
+      <h2>Next Week Roadmap</h2>
+      <ul>{{ROADMAP_LIST}}</ul>
+    </section>
+
+    <footer>Generated by BouldHQ on {{TIMESTAMP}}</footer>
+  </div>
+</body>
+</html>
+
+Replace every {{TOKEN}} with real content. If real Shopify/analytics data isn't available, write a clearly-marked placeholder like "<i>Awaiting Shopify analytics integration</i>" — never invent numbers. Keep bullet lists to 3–6 items each.`;
+
+    return createClaudeCodeAgent({
+      name: 'BouldHQ Assistant',
+      instructions,
+      tools: {
+        findResourceTool,
+        listStoresTool,
+        createTaskForManagerTool,
+        createResourceFileTool,
+        searchBlinkoTool,
+      },
+    });
+  }
+
   static async BaseChatAgent({ withTools = true, withOnlineSearch = false, withMcpTools = true }: { withTools?: boolean; withOnlineSearch?: boolean; withMcpTools?: boolean }) {
-    const provider = await AiModelFactory.GetProvider();
     let tools: Record<string, any> = {};
     if (withTools) {
       tools = {
-        tools: {
-          upsertBlinkoTool,
-          searchBlinkoTool,
-          updateBlinkoTool,
-          deleteBlinkoTool,
-          webExtra,
-          webSearchTool,
-          createCommentTool,
-          createScheduledTaskTool,
-          deleteScheduledTaskTool,
-          listScheduledTasksTool,
-        },
+        upsertBlinkoTool,
+        searchBlinkoTool,
+        updateBlinkoTool,
+        deleteBlinkoTool,
+        webExtra,
+        webSearchTool,
+        createCommentTool,
+        createScheduledTaskTool,
+        deleteScheduledTaskTool,
+        listScheduledTasksTool,
       };
     }
     if (withOnlineSearch) {
-      tools = {
-        tools: { ...tools?.tools, webSearchTool },
-      };
+      tools.webSearchTool = webSearchTool;
     }
 
     // Load MCP tools if enabled
@@ -361,9 +480,7 @@ export class AiModelFactory {
         if (hasMcp) {
           const mcpTools = await getMcpMastraTools();
           if (Object.keys(mcpTools).length > 0) {
-            tools = {
-              tools: { ...tools?.tools, ...mcpTools },
-            };
+            tools = { ...tools, ...mcpTools };
             console.log(`[AI] Loaded ${Object.keys(mcpTools).length} MCP tools`);
           }
         }
@@ -387,50 +504,33 @@ export class AiModelFactory {
       "Always respond in the user's language.\n" +
       'Maintain a friendly and professional conversational tone.';
 
-    const BlinkoAgent = new Agent({
-      name: 'Blinko Chat Agent',
-      instructions: `Today is ${dayjs().format('YYYY-MM-DD HH:mm:ss')}\n` + globalConfig.globalPrompt || defaultInstructions,
-      model: provider?.LLM!,
-      ...tools,
-    });
+    const instructions = globalConfig.globalPrompt
+      ? `Today is ${dayjs().format('YYYY-MM-DD HH:mm:ss')}\n${globalConfig.globalPrompt}`
+      : defaultInstructions;
 
-    const mastra = new Mastra({
-      agents: { BlinkoAgent },
-      logger: process.env.NODE_ENV === 'development' ? new PinoLogger({
-        name: 'Mastra',
-        level: 'debug',
-      }) : undefined
+    return createClaudeCodeAgent({
+      name: 'Blinko Chat Agent',
+      instructions,
+      tools,
     });
-    return mastra.getAgent('BlinkoAgent');
   }
 
   static #createAgentFactory(
     name: string,
     systemPrompt: string | ((customPrompt?: string) => string),
-    loggerName: string,
+    _loggerName: string,
     options?: {
       tools?: Record<string, any>;
       isWritingAgent?: boolean;
     },
   ) {
     return async (type?: 'expand' | 'polish' | 'custom' | string) => {
-      const provider = await AiModelFactory.GetProvider();
       const finalPrompt = typeof systemPrompt === 'function' ? systemPrompt(type!) : systemPrompt;
-
-      const agent = new Agent({
+      return createClaudeCodeAgent({
         name: options?.isWritingAgent ? `${name} - ${type}` : name,
         instructions: finalPrompt,
-        model: provider?.LLM!,
-        ...(options?.tools || {}),
+        tools: options?.tools,
       });
-
-      return new Mastra({
-        agents: { agent },
-        logger: process.env.NODE_ENV === 'development' ? new PinoLogger({
-          name: 'Mastra',
-          level: 'debug',
-        }) : undefined,
-      }).getAgent('agent');
     };
   }
 
@@ -547,6 +647,42 @@ export class AiModelFactory {
   );
 
   static TestConnectAgent = AiModelFactory.#createAgentFactory('Blinko Test Connect Agent', `Test the api is working,return 1 words`, 'BlinkoTestConnect');
+
+  // BouldHQ — classifies a salesman-submitted store request as automatable vs
+  // needs-human, with a short reasoning string. Strict JSON output, no prose.
+  static TriageAgent = AiModelFactory.#createAgentFactory(
+    'BouldHQ Triage Agent',
+    `You are a triage agent for BouldHQ, a Shopify store ops platform.
+You receive a raw message from a salesman that contains what a store owner is asking for.
+Your job is to decide whether the request is automatable by our agents or needs a human operator.
+
+AUTOMATABLE PLAYBOOKS (canAutomate=true, category=one of these slugs):
+  - shopify_collab_invite   — sending or accepting a Shopify collaborator invite
+  - theme_setting_tweak     — color, font, or layout tweak via theme settings JSON
+  - product_metadata_update — update title, description, SEO tags, or pricing on products
+  - inventory_sync_check    — verify or trigger inventory sync between sources
+  - shipping_rate_update    — adjust shipping zones, rates, or carrier settings
+  - app_install             — install or configure a Shopify app
+  - dns_record_check        — verify DNS records / domain config
+  - email_template_edit     — update transactional email copy
+
+NEEDS HUMAN (canAutomate=false, category=human_required):
+  - 3D modeling, custom illustration, photography
+  - Bespoke theme code changes (Liquid templating beyond simple settings)
+  - Strategic / advisory discussion
+  - Legal, accounting, tax
+  - Anything ambiguous, multi-step, or that requires the store owner's judgement
+  - Anything you cannot confidently map to an AUTOMATABLE PLAYBOOK above
+
+OUTPUT FORMAT — RESPOND WITH JSON ONLY. NO MARKDOWN, NO CODE FENCES, NO PROSE BEFORE OR AFTER.
+{
+  "canAutomate": boolean,
+  "category": "<one of the slugs above, or 'human_required'>",
+  "reasoning": "<1-2 sentences, plain English, no jargon>",
+  "suggestedAction": "<concrete next step. For automatable: name the playbook + key parameters. For human: describe what the manager should do>"
+}`,
+    'BouldHQTriage',
+  );
 
   static ImageEmbeddingAgent = AiModelFactory.#createAgentFactory(
     'Blinko Image Embedding Agent',

@@ -5,7 +5,11 @@
   "main": "index.ts",
   "types": "index.ts",
   "dependencies": {
-    "zod": "^4.1.12",
-    "superjson": "^2.2.3"
+    "@types/lodash": "^4.17.24",
+    "dayjs": "^1.11.21",
+    "lodash": "^4.18.1",
+    "lru-cache": "^11.5.1",
+    "superjson": "^2.2.3",
+    "zod": "^4.1.12"
   }
 }

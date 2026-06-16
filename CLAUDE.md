@@ -136,7 +136,39 @@ S3_REGION=
 S3_BUCKET=
 S3_ACCESS_KEY=
 S3_SECRET_KEY=
+
+# AI — Claude Code subscription backs all chat / agent inference.
+# Embeddings, audio, and image still use the providers configured in the
+# AI settings UI; only chat goes through Claude Code.
+CLAUDE_CODE_OAUTH_TOKEN=  # Long-lived OAuth token from `claude setup-token`
 ```
+
+## Claude Code AI backend
+
+All chat-style AI in this app (the `/ai` assistant, completions, writing
+assistant, auto-tag, auto-emoji, AI comments, summaries) is served through
+the owner's Claude Code subscription. Team members never need their own API
+key — every request goes through the single token below.
+
+One-time setup (run on the box that hosts the server, or wherever you
+generate the token):
+
+1. `npm i -g @anthropic-ai/claude-code`
+2. `claude setup-token` — log in with the Claude account that owns the
+   subscription. Copy the long-lived OAuth token it prints.
+3. Set `CLAUDE_CODE_OAUTH_TOKEN=<token>` in the server's `.env` (or in your
+   deployment's secrets).
+4. Restart the server.
+5. Open `/ai` — the header should show a green "Claude Code" chip. Without
+   the token, it shows "AI not connected" and chat calls fail closed with
+   a clear message.
+
+The seam is `server/aiServer/claudeCodeAgent.ts`. To move from a personal
+Max subscription to Claude Enterprise later, swap the token — no code
+changes needed.
+
+Embedding / audio / image models continue to use the `aiProviders` /
+`aiModels` configuration in the AI settings UI.
 
 ## Docker
 

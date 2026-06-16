@@ -20,17 +20,22 @@ import { BlinkoStore } from '@/store/blinkoStore';
 import { useAndroidShortcuts } from '@/lib/hooks';
 import { useQuickaiHotkey } from '@/hooks/useQuickaiHotkey';
 import { useInitialHotkeySetup } from '@/hooks/useInitialHotkeySetup';
+import { useAutoUpdate } from '@/hooks/useAutoUpdate';
+import { useTeamRole } from '@/lib/useTeamRole';
 import { isInTauri, isDesktop } from "@/lib/tauriHelper";
 import { listen } from "@tauri-apps/api/event";
-import QuickNotePage from "./pages/quicknote";
+// QuickNote disabled — page + hotkey hook intentionally not imported.
 import QuickAIPage from "./pages/quickai";
 import QuickToolPage from "./pages/quicktool";
-import { useQuicknoteHotkey } from "./hooks/useQuicknoteHotkey";
 
 const HomePage = lazy(() => import('./pages/index'));
 const SignInPage = lazy(() => import('./pages/signin'));
 const SignUpPage = lazy(() => import('./pages/signup'));
-const HubPage = lazy(() => import('./pages/hub'));
+const HQPage = lazy(() => import('./pages/hq'));
+const StoresPage = lazy(() => import('./pages/stores'));
+const StoreDetailPage = lazy(() => import('./pages/stores/[tagId]'));
+const NewStorePage = lazy(() => import('./pages/stores/new'));
+const NewStoreWizardPage = lazy(() => import('./pages/stores/new-wizard'));
 const AIPage = lazy(() => import('./pages/ai'));
 const ResourcesPage = lazy(() => import('./pages/resources'));
 const ReviewPage = lazy(() => import('./pages/review'));
@@ -50,7 +55,8 @@ const HomeRedirect = () => {
   const blinko = RootStore.Get(BlinkoStore);
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
-  
+  const teamRole = useTeamRole();
+
   useEffect(() => {
     const redirectToDefaultPage = async () => {
       await blinko.config.call();
@@ -61,17 +67,23 @@ const HomeRedirect = () => {
         setLoading(false);
         return;
       }
-      
+
       navigate(`/?path=${defaultHomePage}`, { replace: true });
     };
-    
+
     redirectToDefaultPage();
   }, [navigate, searchParams, location]);
-  
+
+  // Founder-only: the Blinko home is now the team's shared notes feed. Anyone
+  // else lands on /hq (the team dashboard) so they aren't dropped into an empty
+  // page they can't act on.
+  if (teamRole === undefined) return <LoadingPage />;
+  if (teamRole !== 'founder') return <Navigate to="/hq" replace />;
+
   if (loading) {
     return <LoadingPage />;
   }
-  
+
   return <HomePage />;
 };
 
@@ -121,7 +133,7 @@ const getWindowType = () => {
   // Check URL path to determine window type
   const path = window.location.pathname;
   if (path.startsWith('/quicktool')) return 'quicktool';
-  if (path.startsWith('/quicknote')) return 'quicknote';
+  // quicknote intentionally disabled — falls through to the main window.
   if (path.startsWith('/quickai')) return 'quickai';
   return 'main';
 };
@@ -130,10 +142,10 @@ function AppRoutes() {
   const navigate = useNavigate();
   const windowType = getWindowType();
 
-  // Initialize Quick AI hotkey handler inside Router context (only for main window on desktop)
+  // Initialize Quick AI hotkey handler inside Router context (only for main window on desktop).
+  // QuickNote hotkey is disabled.
   if (windowType === 'main' && isDesktop()) {
     useQuickaiHotkey();
-    useQuicknoteHotkey(true);
   }
 
   // Listen for navigation commands from Tauri (only for current window type)
@@ -205,16 +217,6 @@ function AppRoutes() {
         </Suspense>
       );
 
-    case 'quicknote':
-      return (
-        <Suspense fallback={<LoadingPage />}>
-          <Routes>
-            <Route path="/quicknote" element={<QuickNotePage />} />
-            <Route path="*" element={<Navigate to="/quicknote" replace />} />
-          </Routes>
-        </Suspense>
-      );
-
     case 'quickai':
       return (
         <Suspense fallback={<LoadingPage />}>
@@ -232,7 +234,14 @@ function AppRoutes() {
             <Route path="/" element={<ProtectedRoute><HomeRedirect /></ProtectedRoute>} />
             <Route path="/signin" element={<SignInPage />} />
             <Route path="/signup" element={<SignUpPage />} />
-            <Route path="/hub" element={<ProtectedRoute><HubPage /></ProtectedRoute>} />
+            <Route path="/hq" element={<ProtectedRoute><HQPage /></ProtectedRoute>} />
+            <Route path="/hub" element={<Navigate to="/hq" replace />} />
+            <Route path="/stores" element={<ProtectedRoute><StoresPage /></ProtectedRoute>} />
+            <Route path="/stores/new" element={<ProtectedRoute><NewStorePage /></ProtectedRoute>} />
+            <Route path="/stores/new/wizard" element={<ProtectedRoute><NewStoreWizardPage /></ProtectedRoute>} />
+            <Route path="/owner/login" element={<OwnerLoginPage />} />
+            <Route path="/owner" element={<OwnerDashboardPage />} />
+            <Route path="/stores/:tagId" element={<ProtectedRoute><StoreDetailPage /></ProtectedRoute>} />
             <Route path="/ai" element={<ProtectedRoute><AIPage /></ProtectedRoute>} />
             <Route path="/resources" element={<ProtectedRoute><ResourcesPage /></ProtectedRoute>} />
             <Route path="/review" element={<ProtectedRoute><ReviewPage /></ProtectedRoute>} />
@@ -245,7 +254,6 @@ function AppRoutes() {
             <Route path="/share" element={<ShareIndexPage />} />
             <Route path="/share/:id" element={<ShareDetailPage />} />
             <Route path="/ai-share/:id" element={<AiSharePage />} />
-            <Route path="/quicknote" element={<QuickNotePage />} />
             <Route path="/quickai" element={<QuickAIPage />} />
             <Route path="/quicktool" element={<QuickToolPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
@@ -264,6 +272,7 @@ function App() {
   // Initialize hotkey setup for desktop app only
   if (isDesktop()) {
     useInitialHotkeySetup();
+    useAutoUpdate();
   }
 
   useEffect(() => {

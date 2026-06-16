@@ -4,7 +4,14 @@ networks:
 
 services:
   blinko-website:
-    image: blinkospace/blinko:latest
+    # Build from local source so this repo's changes (incl. the Claude Code
+    # AI backend) are baked into the image. The upstream
+    # blinkospace/blinko:latest does not contain these changes.
+    build:
+      context: .
+      args:
+        USE_MIRROR: "true"
+      dockerfile: ./dockerfile
     # container_name: blinko-website
     environment:
       NODE_ENV: production
@@ -12,6 +19,9 @@ services:
       # NEXT_PUBLIC_BASE_URL: http://localhost:1111
       NEXTAUTH_SECRET: my_ultra_secure_nextauth_secret
       DATABASE_URL: postgresql://postgres:mysecretpassword@192.168.31.69:5435/postgres
+      # Owner's Claude Code OAuth token — read from host env / .env.
+      # Generate with `claude setup-token` then export it before docker compose.
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN}
     # depends_on:
     #   postgres:
     #     condition: service_healthy

@@ -20,6 +20,11 @@ export class ResourceStore implements Store {
   refreshTicker = 0
   clipboard: { type: 'cut' | 'copy', items: ResourceType[] } | null = null;
 
+  // BouldHQ — in-app HTML preview modal state.
+  htmlPreview: { name: string; path: string } | null = null;
+  previewHtml(file: { name: string; path: string }) { this.htmlPreview = file; }
+  closeHtmlPreview() { this.htmlPreview = null; }
+
   constructor() {
     makeAutoObservable(this);
   }

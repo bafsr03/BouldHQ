@@ -25,6 +25,10 @@ import { mcpServersRouter } from './mcpServers';
 import { fontRouter } from './font';
 import { storeProfileRouter } from './storeProfile';
 import { bouldhqRouter } from './bouldhq';
+import { teamRouter } from './team';
+import { storeRequestRouter } from './storeRequest';
+import { announcementRouter } from './announcement';
+import { brandOwnerRouter } from './brandOwner';
 export const appRouter = router({
   ai: aiRouter,
   notes: noteRouter,
@@ -46,6 +50,10 @@ export const appRouter = router({
   fonts: fontRouter,
   storeProfile: storeProfileRouter,
   bouldhq: bouldhqRouter,
+  team: teamRouter,
+  storeRequest: storeRequestRouter,
+  announcement: announcementRouter,
+  brandOwner: brandOwnerRouter,
 });
 
 export const createCaller = t.createCallerFactory(appRouter);

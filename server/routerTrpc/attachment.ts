@@ -4,6 +4,25 @@ import { prisma } from '../prisma';
 import { Prisma } from '@prisma/client';
 import path from 'path';
 import { FileService } from '../lib/files';
+import { teamMemberAccountIds } from '../lib/bouldhq';
+
+// Build the set of accountIds whose attachments the caller can see. Includes
+// the caller themselves plus every other member of every team they belong to.
+// Falls back to just the caller if they aren't on a team (legacy / solo).
+async function visibleAccountIds(callerAccountId: number): Promise<number[]> {
+  const memberships = await prisma.teamMember.findMany({
+    where: { accountId: callerAccountId },
+    select: { teamId: true },
+  });
+  if (memberships.length === 0) return [callerAccountId];
+  const teamIds = memberships.map((m) => m.teamId);
+  const teammates = await prisma.teamMember.findMany({
+    where: { teamId: { in: teamIds } },
+    select: { accountId: true },
+  });
+  const set = new Set<number>([callerAccountId, ...teammates.map((t) => t.accountId)]);
+  return Array.from(set);
+}
 
 export interface AttachmentResult {
   id: number | null;
@@ -83,19 +102,14 @@ export const attachmentsRouter = router({
     .query(async function ({ input, ctx }) {
       const { page, size, searchText, folder } = input;
       const skip = (page - 1) * size;
+      const visibleIds = await visibleAccountIds(Number(ctx.id));
 
       if (searchText) {
         const attachments = await prisma.attachments.findMany({
           where: {
             OR: [
-              {
-                note: {
-                  accountId: Number(ctx.id)
-                }
-              },
-              {
-                accountId: Number(ctx.id)
-              }
+              { note: { accountId: { in: visibleIds } } },
+              { accountId: { in: visibleIds } },
             ],
             AND: {
               OR: [
@@ -153,8 +167,8 @@ export const attachmentsRouter = router({
               split_part("perfixPath", ',', array_length(string_to_array(${folderPath}, ','), 1) + 1) as folder_name
             FROM attachments
             WHERE ("noteId" IN (
-              SELECT id FROM notes WHERE "accountId" = ${Number(ctx.id)}
-            ) OR "accountId" = ${Number(ctx.id)})
+              SELECT id FROM notes WHERE "accountId" = ANY(${visibleIds})
+            ) OR "accountId" = ANY(${visibleIds}))
               AND "perfixPath" LIKE ${`${folderPath},%`}
               AND array_length(string_to_array("perfixPath", ','), 1) > array_length(string_to_array(${folderPath}, ','), 1)
             
@@ -176,8 +190,8 @@ export const attachmentsRouter = router({
               NULL as folder_name
             FROM attachments
             WHERE ("noteId" IN (
-              SELECT id FROM notes WHERE "accountId" = ${Number(ctx.id)}
-            ) OR "accountId" = ${Number(ctx.id)})
+              SELECT id FROM notes WHERE "accountId" = ANY(${visibleIds})
+            ) OR "accountId" = ANY(${visibleIds}))
               AND "perfixPath" = ${folderPath}
           )
           SELECT *
@@ -212,8 +226,8 @@ export const attachmentsRouter = router({
             split_part("perfixPath", ',', 1) as folder_name
           FROM attachments
           WHERE ("noteId" IN (
-            SELECT id FROM notes WHERE "accountId" = ${Number(ctx.id)}
-          ) OR "accountId" = ${Number(ctx.id)})
+            SELECT id FROM notes WHERE "accountId" = ANY(${visibleIds})
+          ) OR "accountId" = ANY(${visibleIds}))
             AND "perfixPath" != ''
             AND LOWER("perfixPath") LIKE ${`%${searchText?.toLowerCase() || ''}%`}
           
@@ -235,8 +249,8 @@ export const attachmentsRouter = router({
             NULL as folder_name
           FROM attachments
           WHERE ("noteId" IN (
-            SELECT id FROM notes WHERE "accountId" = ${Number(ctx.id)}
-          ) OR "accountId" = ${Number(ctx.id)})
+            SELECT id FROM notes WHERE "accountId" = ANY(${visibleIds})
+          ) OR "accountId" = ANY(${visibleIds}))
             AND depth = 0
             AND LOWER(path) LIKE ${`%${searchText?.toLowerCase() || ''}%`}
         )

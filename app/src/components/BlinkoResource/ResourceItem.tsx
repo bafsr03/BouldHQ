@@ -185,14 +185,44 @@ const ResourceCard = observer(({ item, isSelected, onSelect, isDragging, isDragg
 const ResourceItem = observer(({ item, index, onSelect, isSelected, onFolderClick }: ResourceItemProps) => {
   const { t } = useTranslation();
 
+  const isHtmlFile = useMemo(() => {
+    if (item.isFolder) return false;
+    const name = (item.name || '').toLowerCase();
+    const type = (item.type || '').toLowerCase();
+    return name.endsWith('.html') || name.endsWith('.htm') || type === 'text/html';
+  }, [item.isFolder, item.name, item.type]);
+
+  const isPdfFile = useMemo(() => {
+    if (item.isFolder) return false;
+    const name = (item.name || '').toLowerCase();
+    const type = (item.type || '').toLowerCase();
+    return name.endsWith('.pdf') || type === 'application/pdf';
+  }, [item.isFolder, item.name, item.type]);
+
+  const openableInTab = isHtmlFile || isPdfFile;
+
   const handleClick = useMemo(
     () => (e: React.MouseEvent) => {
       if (item.isFolder) {
         e.preventDefault();
         onFolderClick(item.folderName || '');
+        return;
+      }
+      // BouldHQ: HTML opens in an in-app modal reader (srcDoc-fed iframe).
+      // PDF still gets a new tab — browsers handle PDF preview natively.
+      if (isHtmlFile && item.path) {
+        e.preventDefault();
+        RootStore.Get(ResourceStore).previewHtml({ name: item.name || 'document.html', path: item.path });
+        return;
+      }
+      if (isPdfFile && item.path) {
+        e.preventDefault();
+        const token = RootStore.Get(UserStore).tokenData.value?.token;
+        const url = getBlinkoEndpoint(`${item.path}${token ? `?token=${encodeURIComponent(token)}` : ''}`);
+        window.open(url, '_blank', 'noopener,noreferrer');
       }
     },
-    [item.isFolder, item.folderName, onFolderClick],
+    [item.isFolder, item.folderName, item.path, item.name, onFolderClick, isHtmlFile, isPdfFile],
   );
 
   const draggableId = useMemo(() => (item.isFolder ? `folder-${item.folderName}` : String(item.id)), [item.isFolder, item.folderName, item.id]);
@@ -203,7 +233,7 @@ const ResourceItem = observer(({ item, index, onSelect, isSelected, onFolderClic
     <Draggable draggableId={draggableId} index={index} isDragDisabled={item.isFolder}>
       {(provided: any, snapshot: any) => {
         const draggableStyle = {
-          cursor: item.isFolder ? 'pointer' : 'default',
+          cursor: item.isFolder || openableInTab ? 'pointer' : 'default',
           ...provided.draggableProps.style,
           transform: item.isFolder ? 'none' : provided.draggableProps.style?.transform,
         };

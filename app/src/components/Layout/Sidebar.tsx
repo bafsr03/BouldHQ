@@ -7,11 +7,10 @@ import { SideBarItem } from './index';
 import { useTranslation } from 'react-i18next';
 import { useMediaQuery } from 'usehooks-ts';
 import { UserAvatarDropdown } from '../Common/UserAvatarDropdown';
-import { TagListPanel } from '../Common/TagListPanel';
 import { useEffect, useState } from 'react';
-import { BlinkoStore } from '@/store/blinkoStore';
 import { useLocation, useSearchParams, Link, useNavigate } from 'react-router-dom';
 import { eventBus } from '@/lib/event';
+import { useIsFounder } from '@/lib/useTeamRole';
 
 interface SidebarProps {
   onItemClick?: () => void;
@@ -22,10 +21,10 @@ export const Sidebar = observer(({ onItemClick }: SidebarProps) => {
   const { t } = useTranslation();
   const base = RootStore.Get(BaseStore);
   const navigate = useNavigate();
-  const blinkoStore = RootStore.Get(BlinkoStore);
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const [isHovering, setIsHovering] = useState(false);
+  const isFounder = useIsFounder();
 
   const routerInfo = {
     pathname: location.pathname,
@@ -95,6 +94,7 @@ export const Sidebar = observer(({ onItemClick }: SidebarProps) => {
         <div className={`flex flex-col gap-1 mt-4 font-semibold ${base.isSidebarCollapsed ? 'items-center gap-4' : ''}`}>
           {base.routerList
             .filter((i) => !i.hiddenSidebar)
+            .filter((i) => !(i as any).founderOnly || isFounder)
             .map((i) => (
               <Link
                 key={i.title}
@@ -111,7 +111,6 @@ export const Sidebar = observer(({ onItemClick }: SidebarProps) => {
                 {!base.isSidebarCollapsed && <span className="!transition-all">{t(i.title)}</span>}
               </Link>
             ))}
-          {!base.isSidebarCollapsed && blinkoStore.tagList.value?.listTags.length != 0 && blinkoStore.tagList.value?.listTags && <TagListPanel />}
         </div>
       </ScrollShadow>
 

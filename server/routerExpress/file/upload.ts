@@ -1,6 +1,7 @@
 import express from 'express';
 import { FileService } from '../../lib/files';
 import { getTokenFromRequest } from '../../lib/helper';
+import { autoRouteUploadByFilename } from '../../lib/bouldhq';
 import { Readable, PassThrough } from 'stream';
 import busboy from 'busboy';
 import cors from 'cors';
@@ -186,6 +187,14 @@ router.post('/', async (req, res) => {
           type: fileInfo.mimeType,
           size: fileInfo.size
         });
+
+        // BouldHQ — fire-and-forget auto-route to a store's Branding Assets
+        // folder when the filename mentions a team store (e.g. "JCK_logo.png").
+        const uploadedPath = (filePath as any)?.filePath;
+        if (uploadedPath) {
+          autoRouteUploadByFilename(Number(token.id), uploadedPath, fileInfo.filename)
+            .catch((err) => console.error('autoRouteUploadByFilename', err));
+        }
       } catch (error) {
         console.error('Upload error:', error);
         res.status(500).json({ error: "Upload failed" });

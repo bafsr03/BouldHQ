@@ -9,11 +9,12 @@ import { DragDropContext, Droppable } from 'react-beautiful-dnd-next';
 import { toJS } from "mobx";
 import { MemoizedResourceItem } from "@/components/BlinkoResource/ResourceItem";
 import { ResourceMultiSelectPop } from "@/components/BlinkoResource/ResourceMultiSelectpop";
+import { HtmlPreviewModal } from "@/components/BouldHQ/HtmlPreviewModal";
 import { Breadcrumbs, BreadcrumbItem, Button } from "@heroui/react";
 import { AnimatePresence, motion } from "framer-motion";
 import { LoadingAndEmpty } from "@/components/Common/LoadingAndEmpty";
 import { PhotoProvider } from "react-photo-view";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 const Page = observer(() => {
   const navigate = useNavigate();
   const resourceStore = RootStore.Get(ResourceStore);
@@ -52,6 +53,20 @@ const Page = observer(() => {
           onBottom={resourceStore.loadNextPage}
           className="md:px-6 h-[calc(100%_-_5px)] md:h-[calc(100vh_-_100px)] px-2 md:max-w-[1000px] w-full overflow-x-hidden mx-auto"
         >
+          <Link
+            to="/ai"
+            className="flex items-center gap-3 rounded-xl border border-divider bg-content1 hover:border-primary hover:bg-primary/5 transition-colors px-4 py-2.5 mb-3 mt-2"
+          >
+            <Icon icon="tabler:sparkles" width={16} height={16} className="text-primary" />
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium">Can't find something?</div>
+              <div className="text-xs text-default-500">
+                Ask the BouldHQ assistant — it searches your resources, notes, and can open a task for the manager.
+              </div>
+            </div>
+            <Icon icon="tabler:chevron-right" width={16} height={16} className="text-default-400" />
+          </Link>
+
           <div className="flex items-center justify-between ">
             <div className="flex items-center gap-2">
               <AnimatePresence mode="wait">
@@ -209,6 +224,12 @@ const Page = observer(() => {
         </ScrollArea>
       </DragDropContext>
       <ResourceMultiSelectPop />
+      <HtmlPreviewModal
+        isOpen={!!resourceStore.htmlPreview}
+        onClose={() => resourceStore.closeHtmlPreview()}
+        fileName={resourceStore.htmlPreview?.name ?? ''}
+        filePath={resourceStore.htmlPreview?.path ?? null}
+      />
     </>
   );
 });

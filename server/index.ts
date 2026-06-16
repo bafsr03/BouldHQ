@@ -14,6 +14,8 @@ import { RebuildEmbeddingJob } from './jobs/rebuildEmbeddingJob';
 import { RecommandJob } from './jobs/recommandJob';
 import { AIScheduledTaskJob } from './jobs/aiScheduledTaskJob';
 import { WeeklyTrackerJob } from './jobs/weeklyTrackerJob';
+import { RequestSweepJob } from './jobs/requestSweepJob';
+import { BouldhqBootstrapDocs } from './jobs/bouldhqBootstrapDocs';
 
 // tRPC related imports
 import { createContext } from './context';
@@ -34,6 +36,7 @@ import pluginRouter from './routerExpress/file/plugin';
 import rssRouter from './routerExpress/rss';
 import openaiRouter from './routerExpress/openai';
 import mcpRouter from './routerExpress/mcp';
+import brandOwnerAuthRouter from './routerExpress/brandOwner';
 
 // Vite integration
 import ViteExpress from 'vite-express';
@@ -83,7 +86,12 @@ async function initializeJobs() {
     await AIScheduledTaskJob.initialize();
     await WeeklyTrackerJob.initialize();
     await WeeklyTrackerJob.Start(undefined, false);
-    
+    await RequestSweepJob.initialize();
+    await RequestSweepJob.Start(undefined, false);
+
+    // Seed the BouldHQ AI Commands manual into each team's Resources.
+    await BouldhqBootstrapDocs.run();
+
     console.log('All scheduled jobs initialized successfully');
   } catch (error) {
     console.error('Failed to initialize scheduled jobs:', error);
@@ -134,6 +142,7 @@ const errorHandler = (err: any, req: express.Request, res: express.Response, nex
 async function setupApiRoutes(app: express.Application) {
   // Authentication routes
   app.use('/api/auth', authRoutes);
+  app.use('/api/owner', brandOwnerAuthRouter);
 
   // tRPC endpoint with adapter for Express
   app.use('/api/trpc',
@@ -316,16 +325,22 @@ async function bootstrap() {
 
     // Start or update server
     if (!server) {
-      const server = app.listen(PORT, "0.0.0.0", () => {
+      const httpServer = app.listen(PORT, "0.0.0.0", () => {
         console.log(`🎉server start on port http://0.0.0.0:${PORT} - env: ${process.env.NODE_ENV || 'development'}`);
       });
-      
+      server = httpServer;
+
       // Increase timeout for large file uploads (5 minutes)
-      server.timeout = 5 * 60 * 1000;
-      server.keepAliveTimeout = 5 * 60 * 1000;
-      server.headersTimeout = 5 * 60 * 1000;
-      
-      ViteExpress.bind(app, server); // the server binds to all network interfaces
+      httpServer.timeout = 5 * 60 * 1000;
+      httpServer.keepAliveTimeout = 5 * 60 * 1000;
+      httpServer.headersTimeout = 5 * 60 * 1000;
+
+      // BouldHQ Phase 4 — agent-manager terminal over /ws/terminal.
+      // Must be attached BEFORE ViteExpress.bind so the upgrade event is observed.
+      const { attachTerminalServer } = await import('./lib/terminalServer');
+      attachTerminalServer(httpServer);
+
+      ViteExpress.bind(app, httpServer); // the server binds to all network interfaces
     } else {
       console.log(`API routes updated - env: ${process.env.NODE_ENV || 'development'}`);
     }
@@ -334,10 +349,13 @@ async function bootstrap() {
     try {
       // Attempt to start server even if route setup fails
       if (!server) {
-        const server = app.listen(PORT, "0.0.0.0", () => {
+        const httpServer = app.listen(PORT, "0.0.0.0", () => {
           console.log(`🎉server start on port http://0.0.0.0:${PORT} - env: ${process.env.NODE_ENV || 'development'}`);
         });
-        ViteExpress.bind(app, server); // the server binds to all network interfaces
+        server = httpServer;
+        const { attachTerminalServer } = await import('./lib/terminalServer');
+        attachTerminalServer(httpServer);
+        ViteExpress.bind(app, httpServer); // the server binds to all network interfaces
       }
     } catch (startupError) {
       console.error('start server error:', startupError);

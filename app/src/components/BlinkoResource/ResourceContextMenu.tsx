@@ -175,6 +175,66 @@ export const ResourceContextMenu = observer(({ onTrigger }: ResourceContextMenuP
       resourceStore.clipboard.items.length > 0;
   };
 
+  // BouldHQ — pop a small dialog with the team's stores; on pick, route the
+  // attachment under Branding Assets/<store>/. Reuses the existing bouldhq
+  // route endpoint that the StoreProfileCard logo flow already uses.
+  const handleFileUnderStore = async () => {
+    if (!resource || resource.isFolder || !resource.path) return;
+    const stores = await api.storeProfile.list.query({ includeArchived: false }).catch(() => [] as any[]);
+    if (!stores.length) {
+      RootStore.Get(ToastPlugin).error('No stores in your team yet');
+      return;
+    }
+
+    RootStore.Get(DialogStore).setData({
+      isOpen: true,
+      title: 'File under a store',
+      content: () => (
+        <div className="flex flex-col gap-2 p-2">
+          <p className="text-xs text-default-500 mb-1">
+            Pick a store — the file moves to <code className="font-mono">Branding Assets/&lt;store&gt;/</code>.
+          </p>
+          <ul className="divide-y divide-divider rounded-md border border-divider max-h-80 overflow-auto">
+            {(stores as any[])
+              .slice()
+              .sort((a: any, b: any) => a.tagName.localeCompare(b.tagName))
+              .map((s: any) => (
+                <li key={s.tagId}>
+                  <button
+                    type="button"
+                    className="w-full text-left px-3 py-2 hover:bg-default-100 transition-colors flex items-center justify-between"
+                    onClick={async () => {
+                      await RootStore.Get(ToastPlugin).promise(
+                        PromiseCall(
+                          api.bouldhq.routeAttachmentByPath.mutate({
+                            path: resource.path!,
+                            tagName: s.tagName,
+                          }),
+                          { autoAlert: false },
+                        ),
+                        {
+                          loading: 'Filing under ' + s.tagName + '…',
+                          success: 'Filed under ' + s.tagName,
+                          error: 'Failed to file',
+                        },
+                      );
+                      RootStore.Get(DialogStore).close();
+                      resourceStore.refreshTicker++;
+                    }}
+                  >
+                    <span className="text-sm font-medium">{s.tagName}</span>
+                    {s.storeUrl && (
+                      <span className="text-xs font-mono text-default-500 truncate ml-2">{s.storeUrl}</span>
+                    )}
+                  </button>
+                </li>
+              ))}
+          </ul>
+        </div>
+      ),
+    });
+  };
+
   const handleMoveToParent = async () => {
     if (!resource || !resourceStore.currentFolder) return;
     await RootStore.Get(ToastPlugin).promise(
@@ -218,6 +278,14 @@ export const ResourceContextMenu = observer(({ onTrigger }: ResourceContextMenuP
             />
           </DropdownItem>
         ) : null}
+
+        {
+          resource?.isFolder ? null : (
+            <DropdownItem key="fileUnderStore" onPress={handleFileUnderStore}>
+              <MenuItem icon="tabler:building-store" label="File under store…" />
+            </DropdownItem>
+          )
+        }
 
         {
           resource?.isFolder ? null : (

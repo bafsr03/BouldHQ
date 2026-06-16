@@ -14,7 +14,7 @@ import { Context } from '../context';
 import { cache } from '@shared/lib/cache';
 import { AiModelFactory } from '@server/aiServer/aiModelFactory';
 import { authProcedure, demoAuthMiddleware, publicProcedure, router } from '@server/middleware';
-import { ensureBrandingFolderForTag, routeAttachmentToBrandingFolder } from '@server/lib/bouldhq';
+import { ensureBrandingFolderForTag, routeAttachmentToBrandingFolder, ensureWeeklyTrackerNote } from '@server/lib/bouldhq';
 
 const extractHashtags = (input: string): string[] => {
   const withoutCodeBlocks = input.replace(/```[\s\S]*?```/g, '');
@@ -118,11 +118,35 @@ export const noteRouter = router({
         return [];
       }
 
+      // BouldHQ: if the caller is a founder of any team, broaden the personal
+      // feed (Blinko/Notes/Todo) to include teammates' notes. The Blinko home
+      // is founder-only at the route level, so this only meaningfully affects
+      // founders — managers/salesmen never land here directly. Non-founders
+      // (or anyone not on a team) keep the original per-account scope.
+      const callerId = Number(ctx.id);
+      const teammateIds: number[] = await (async () => {
+        const founderMemberships = await prisma.teamMember.findMany({
+          where: { accountId: callerId, role: 'founder' },
+          select: { teamId: true },
+        });
+        if (founderMemberships.length === 0) return [];
+        const mates = await prisma.teamMember.findMany({
+          where: { teamId: { in: founderMemberships.map((m) => m.teamId) } },
+          select: { accountId: true },
+        });
+        return Array.from(new Set(mates.map((m) => m.accountId)));
+      })();
+
+      const ownershipOr: Prisma.notesWhereInput[] = [
+        { accountId: callerId },
+        { internalShares: { some: { accountId: callerId } } },
+      ];
+      if (teammateIds.length > 0) {
+        ownershipOr.push({ accountId: { in: teammateIds } });
+      }
+
       let where: Prisma.notesWhereInput = {
-        OR: [
-          { accountId: Number(ctx.id) },
-          { internalShares: { some: { accountId: Number(ctx.id) } } }
-        ],
+        OR: ownershipOr,
         isRecycle: isRecycle
       };
 
@@ -168,8 +192,38 @@ export const noteRouter = router({
       }
 
       if (tagId) {
-        const tags = await prisma.tagsToNote.findMany({ where: { tagId } });
-        where.id = { in: tags?.map((i) => i.noteId) };
+        // BouldHQ: if this tag is a team-store tag and the caller is a member of
+        // that team, broaden visibility from "my notes / shared with me" to
+        // "every team member's notes attached to this tag" — store ops is shared.
+        const taggedTag = await prisma.tag.findUnique({
+          where: { id: tagId },
+          select: { teamId: true },
+        });
+        const isMyTeamTag = taggedTag?.teamId
+          ? !!(await prisma.teamMember.findFirst({
+              where: { accountId: Number(ctx.id), teamId: taggedTag.teamId },
+              select: { id: true },
+            }))
+          : false;
+
+        if (isMyTeamTag) {
+          delete (where as any).OR;
+          where.tags = { some: { tagId } };
+        } else {
+          const tags = await prisma.tagsToNote.findMany({ where: { tagId } });
+          where.id = { in: tags?.map((i) => i.noteId) };
+        }
+      } else {
+        // BouldHQ: personal home (`/`, `/?path=notes`, `/?path=todo`) shows EVERY
+        // note you own — even ones tagged with a store. Your own notes are your
+        // kanban; a store-tagged note legitimately appears in both your personal
+        // stream AND on /stores/:tagId for team visibility.
+        //
+        // We only hide system-generated notes (weekly tracker etc.) — those have
+        // a dedicated home in the /hq Heads-up section. Filtering post-query keeps
+        // the Postgres JSON-path NULL semantics from accidentally dropping every
+        // note that has metadata without the bouldhqSystem key.
+        // (Take is increased to compensate for any drops within the page.)
       }
       if (withFile) {
         where.attachments = { some: {} };
@@ -246,11 +300,46 @@ export const noteRouter = router({
             },
           },
           internalShares: true,
+          // BouldHQ: include the note's author so the client can attribute
+          // each card to its founder. We only ship a small public-safe slice.
+          account: {
+            select: { id: true, name: true, nickname: true, image: true },
+          },
         },
       });
 
-      return notes.map((note) => ({
+      // BouldHQ: personal home (`/`, `/?path=notes`, `/?path=todo`) hides
+      //   (a) system-generated notes (weekly tracker → /hq Heads-up)
+      //   (b) notes that carry any team-store tag — those belong to a store and
+      //       live on /stores/:tagId. A note with #adophies stays out of /.
+      // Done post-query (the tags + their teamId are already included above) to
+      // dodge Postgres JSON-path NULL semantics that previously dropped rows
+      // with metadata objects missing the bouldhqSystem key.
+      let filteredNotes = notes;
+      if (!tagId) {
+        const myTeamIds = new Set(
+          (await prisma.teamMember.findMany({
+            where: { accountId: Number(ctx.id) },
+            select: { teamId: true },
+          })).map((m) => m.teamId),
+        );
+        filteredNotes = notes.filter((n) => {
+          const meta = (n.metadata as any) || {};
+          if (meta.bouldhqSystem === true) return false;
+          // BouldHQ: any note that was once a store note carries the store id
+          // in metadata. Drop it from the personal feed even if its tag was
+          // removed (deleted store, legacy data, etc).
+          if (typeof meta.bouldhqStoreId === 'number') return false;
+          for (const t of n.tags) {
+            if (t.tag?.teamId != null && myTeamIds.has(t.tag.teamId)) return false;
+          }
+          return true;
+        });
+      }
+
+      return filteredNotes.map((note) => ({
         ...note,
+        owner: note.account ?? null,
         isInternalShared: note.internalShares.length > 0,
       }));
     }),
@@ -1013,6 +1102,8 @@ export const noteRouter = router({
         for (const t of newTags.filter(t => t && t.parent === 0)) {
           ensureBrandingFolderForTag(Number(ctx.id), t.name).catch(e => console.error('ensureBrandingFolder', e));
         }
+        // BouldHQ: refresh weekly tracker note (counts may have changed if a new top-level tag was created)
+        ensureWeeklyTrackerNote(Number(ctx.id)).catch(e => console.error('ensureWeeklyTrackerNote', e));
         const oldTags = oldTagsInThisNote.map((i) => i.tag).filter((i) => !!i);
         const oldTagsString = oldTags.map((i) => `${i?.name}<key>${i?.parent}`);
         const newTagsString = newTags.map((i) => `${i?.name}<key>${i?.parent}`);
@@ -1148,6 +1239,8 @@ export const noteRouter = router({
           for (const t of newTags.filter(t => t && t.parent === 0)) {
             ensureBrandingFolderForTag(Number(ctx.id), t.name).catch(e => console.error('ensureBrandingFolder', e));
           }
+          // BouldHQ: refresh weekly tracker note (counts may have changed if a new top-level tag was created)
+          ensureWeeklyTrackerNote(Number(ctx.id)).catch(e => console.error('ensureWeeklyTrackerNote', e));
           const attachmentsIds = await prisma.attachments.findMany({ where: { path: { in: attachments.map((i) => i.path) } } });
           await prisma.attachments.updateMany({ where: { id: { in: attachmentsIds.map((i) => i.id) } }, data: { noteId: note.id } });
           // BouldHQ: route new attachments into Branding Assets/<tag>/ if the note has exactly one top-level client tag
@@ -1329,7 +1422,24 @@ export const noteRouter = router({
     .mutation(async function ({ input, ctx }) {
       const { ids } = input;
       SendWebhook({ ids }, 'delete', ctx);
-      return await prisma.notes.updateMany({ where: { id: { in: ids }, accountId: Number(ctx.id) }, data: { isRecycle: true } });
+      // BouldHQ: founders can recycle teammates' notes too — otherwise an
+      // orphan that ended up owned by a colleague is impossible to clean up.
+      // Non-founders stay strictly limited to their own notes.
+      const callerId = Number(ctx.id);
+      const founderTeams = await prisma.teamMember.findMany({
+        where: { accountId: callerId, role: 'founder' },
+        select: { teamId: true },
+      });
+      const teammateIds = founderTeams.length
+        ? (await prisma.teamMember.findMany({
+            where: { teamId: { in: founderTeams.map((m) => m.teamId) } },
+            select: { accountId: true },
+          })).map((m) => m.accountId)
+        : [callerId];
+      return await prisma.notes.updateMany({
+        where: { id: { in: ids }, accountId: { in: teammateIds } },
+        data: { isRecycle: true, isTop: false },
+      });
     }),
   deleteMany: authProcedure
     .use(demoAuthMiddleware)
@@ -1341,11 +1451,24 @@ export const noteRouter = router({
     )
     .output(z.any())
     .mutation(async function ({ input, ctx }) {
-      // Verify user owns all notes (internally shared users cannot delete)
+      // BouldHQ: same broadening as trashMany — founders can hard-delete a
+      // teammate's note (e.g. clean up a stale store leftover).
+      const callerId = Number(ctx.id);
+      const founderTeams = await prisma.teamMember.findMany({
+        where: { accountId: callerId, role: 'founder' },
+        select: { teamId: true },
+      });
+      const allowedOwnerIds = founderTeams.length
+        ? (await prisma.teamMember.findMany({
+            where: { teamId: { in: founderTeams.map((m) => m.teamId) } },
+            select: { accountId: true },
+          })).map((m) => m.accountId)
+        : [callerId];
+
       const notes = await prisma.notes.findMany({
         where: {
           id: { in: input.ids },
-          accountId: Number(ctx.id) // Only allow deleting if user is the owner
+          accountId: { in: allowedOwnerIds },
         },
       });
 

@@ -1,0 +1,210 @@
+// On server startup, write a static markdown manual of available AI commands
+// to Resources for each team's founder. Source of truth is SLASH_COMMANDS, so
+// the manual never drifts from runtime behaviour.
+//
+// Idempotent: if a current-version manual is already present, do nothing.
+
+import { prisma } from '@server/prisma';
+import { FileService } from '@server/lib/files';
+import {
+  SLASH_COMMANDS,
+  slashCommandsAsHtmlRows,
+} from '@server/aiServer/slashCommands';
+
+const MANUAL_FILENAME = 'Commands.html';
+const MANUAL_FOLDER = 'BouldHQ';
+const MANUAL_VERSION = 'v2'; // bumped — was .md before
+
+function buildManual(): string {
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = slashCommandsAsHtmlRows();
+  const empty = SLASH_COMMANDS.length === 0
+    ? '<p><em>No commands registered yet.</em></p>'
+    : '';
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>BouldHQ AI Commands</title>
+<style>
+  :root {
+    --brand-primary: #111;
+    --brand-accent: #e85d2c;
+    --bg: #fafafa;
+    --fg: #111;
+    --muted: #666;
+    --border: #e5e5e5;
+    --radius: 12px;
+    --maxw: 880px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif;
+  }
+  body { margin: 0; background: var(--bg); color: var(--fg); }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 48px 24px; }
+  header { display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border); padding-bottom:24px; margin-bottom:32px; }
+  header .brand { font-weight: 700; letter-spacing:-0.02em; font-size:24px; color:var(--brand-primary); }
+  header .meta { color: var(--muted); font-size: 13px; text-align:right; }
+  h1 { font-size: 32px; letter-spacing:-0.02em; margin: 0 0 8px; }
+  h2 { font-size: 18px; margin: 36px 0 12px; color: var(--brand-primary); }
+  p { line-height: 1.6; }
+  section { background:#fff; border:1px solid var(--border); border-radius:var(--radius); padding:20px 24px; margin-bottom:16px; }
+  .pill { display:inline-block; padding:2px 10px; border-radius:999px; background:var(--brand-accent); color:#fff; font-size:12px; font-weight:600; }
+  table { width:100%; border-collapse: collapse; margin-top:8px; }
+  th, td { padding: 10px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; font-size: 14px; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; }
+  code { background: #f3f3f3; padding: 2px 6px; border-radius: 4px; font-size: 13px; font-family: 'SF Mono', Menlo, Consolas, monospace; }
+  ul { padding-left: 20px; line-height: 1.7; }
+  li { margin: 4px 0; }
+  .alias { color: var(--muted); font-size: 12px; }
+  footer { color: var(--muted); font-size:12px; text-align:center; margin-top:32px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">BouldHQ</div>
+      <div class="meta">AI Commands · ${today}</div>
+    </header>
+
+    <h1>AI Commands</h1>
+    <span class="pill">Reference · ${MANUAL_VERSION}</span>
+    <p>Slash commands you can type in the <strong>AI</strong> panel. The assistant understands plain English too — slash commands just trigger deterministic flows so the result is the same every time.</p>
+
+    <section>
+      <h2>Commands</h2>
+      ${empty}
+      <table>
+        <thead>
+          <tr><th>Command</th><th>What it does</th><th>Example</th></tr>
+        </thead>
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>How tools work</h2>
+      <p>When you ask the assistant to do something, it will call internal tools and you'll see a small chip above its response showing which tool ran (<code>listed stores</code>, <code>searched resources</code>, <code>opened request</code>, <code>created resource file</code>, etc). If you don't see a chip, no tool ran.</p>
+      <ul>
+        <li><code>bouldhq-list-stores</code> — list the team's Shopify stores</li>
+        <li><code>bouldhq-find-resource</code> — search the Resources panel</li>
+        <li><code>bouldhq-create-task-for-manager</code> — open a manager task for a store</li>
+        <li><code>bouldhq-create-resource-file</code> — save a new file (HTML / MD / TXT) into Resources</li>
+        <li><code>search-blinko-tool</code> — semantic search across Notes</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Tips</h2>
+      <ul>
+        <li>For reports, use <code>/report &lt;store&gt;</code> — the file lands in <strong>Branding Assets › &lt;store&gt; › Reports</strong>.</li>
+        <li>For ad-hoc lookups, plain English works fine — <em>"how many stores do we have?"</em></li>
+        <li>The AI can generate any document on demand — say <em>"create an HTML SOP for onboarding a new store and save it under SOPs/"</em> and it will use <code>bouldhq-create-resource-file</code>.</li>
+      </ul>
+    </section>
+
+    <footer>Generated by BouldHQ on ${today}</footer>
+  </div>
+</body>
+</html>`;
+}
+
+async function teamFounderAccountIds(): Promise<number[]> {
+  const founders = await prisma.teamMember.findMany({
+    where: { role: 'founder' },
+    select: { accountId: true, teamId: true },
+    orderBy: [{ teamId: 'asc' }, { id: 'asc' }],
+  });
+  // First founder per team — same stability rule used elsewhere.
+  const byTeam = new Map<number, number>();
+  for (const f of founders) {
+    if (!byTeam.has(f.teamId)) byTeam.set(f.teamId, f.accountId);
+  }
+  return Array.from(byTeam.values());
+}
+
+async function alreadyHasCurrentManual(accountId: number): Promise<boolean> {
+  const existing = await prisma.attachments.findFirst({
+    where: {
+      accountId,
+      name: MANUAL_FILENAME,
+      perfixPath: MANUAL_FOLDER,
+    },
+    select: { id: true, metadata: true },
+  });
+  if (!existing) return false;
+  const v = (existing.metadata as any)?.bouldhqManualVersion;
+  return v === MANUAL_VERSION;
+}
+
+async function ensureFolderRow(accountId: number, perfixPath: string): Promise<void> {
+  const exists = await prisma.attachments.findFirst({
+    where: { accountId, type: 'folder', perfixPath, name: '.folder' },
+    select: { id: true },
+  });
+  if (exists) return;
+  await prisma.attachments.create({
+    data: {
+      path: `/api/file/${perfixPath}/.folder`,
+      name: '.folder',
+      size: 0,
+      type: 'folder',
+      perfixPath,
+      depth: 1,
+      accountId,
+      isShare: false,
+      sharePassword: '',
+      sortOrder: 0,
+    },
+  });
+}
+
+async function writeManualFor(accountId: number): Promise<void> {
+  if (await alreadyHasCurrentManual(accountId)) return;
+
+  // Remove any older version of the manual, including the legacy .md name
+  // from the first iteration of this job.
+  await prisma.attachments.deleteMany({
+    where: {
+      accountId,
+      perfixPath: MANUAL_FOLDER,
+      name: { in: [MANUAL_FILENAME, 'Commands.md'] },
+    },
+  });
+
+  await ensureFolderRow(accountId, MANUAL_FOLDER);
+
+  const buffer = Buffer.from(buildManual(), 'utf-8');
+  const { filePath } = await FileService.uploadFile({
+    buffer,
+    originalName: MANUAL_FILENAME,
+    type: 'text/html',
+    accountId,
+    metadata: { bouldhqManualVersion: MANUAL_VERSION },
+  });
+
+  // Place into the BouldHQ folder.
+  await prisma.attachments.updateMany({
+    where: { path: filePath, accountId },
+    data: { perfixPath: MANUAL_FOLDER, depth: 2 },
+  });
+}
+
+export class BouldhqBootstrapDocs {
+  static async run(): Promise<void> {
+    try {
+      const accountIds = await teamFounderAccountIds();
+      if (accountIds.length === 0) return;
+      for (const accountId of accountIds) {
+        try {
+          await writeManualFor(accountId);
+        } catch (err: any) {
+          console.warn(`[bouldhq-bootstrap-docs] failed for account ${accountId}:`, err?.message || err);
+        }
+      }
+      console.log(`[bouldhq-bootstrap-docs] commands manual ${MANUAL_VERSION} ensured for ${accountIds.length} team(s)`);
+    } catch (err: any) {
+      console.warn('[bouldhq-bootstrap-docs] skipped:', err?.message || err);
+    }
+  }
+}

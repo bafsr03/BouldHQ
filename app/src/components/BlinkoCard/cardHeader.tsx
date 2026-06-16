@@ -102,7 +102,7 @@ export const CardHeader = observer(({ blinkoItem, blinko, isShareMode, isExpande
         )}
 
         <Tooltip content={t('edit-time')} delay={1000}>
-          <div 
+          <div
             className={`${isExpanded ? 'text-sm' : 'text-xs'} text-desc cursor-pointer transition-colors`}
             onClick={(e) => {
               e.stopPropagation();
@@ -116,6 +116,15 @@ export const CardHeader = observer(({ blinkoItem, blinko, isShareMode, isExpande
             }
           </div>
         </Tooltip>
+
+        {/* BouldHQ: show the note's author so it's clear whose card this is on
+            the shared founder feed. Falls back gracefully when owner isn't set
+            (legacy notes, public views). */}
+        {(blinkoItem as any).owner && (
+          <div className={`${isExpanded ? 'text-sm' : 'text-xs'} text-desc font-medium`}>
+            — {(blinkoItem as any).owner.nickname || (blinkoItem as any).owner.name}
+          </div>
+        )}
 
         <Copy
           size={16}

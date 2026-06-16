@@ -1,9 +1,11 @@
 import { router, authProcedure } from '../middleware';
+import { userCaller } from './_app';
 import { z } from 'zod';
 import { AiService } from '@server/aiServer';
 import { prisma } from '../prisma';
 import { TRPCError } from '@trpc/server';
 import { CoreMessage } from '@mastra/core';
+import { RuntimeContext } from '@mastra/core/di';
 import { AiModelFactory } from '@server/aiServer/aiModelFactory';
 import { RebuildEmbeddingJob } from '../jobs/rebuildEmbeddingJob';
 import { getAllPathTags } from '@server/lib/helper';
@@ -11,8 +13,20 @@ import { ModelCapabilities } from '@server/aiServer/types';
 import { aiProviders, aiModels } from '@shared/lib/prismaZodType';
 import { fetchWithProxy } from '@server/lib/proxy';
 import { inferModelCapabilities } from '@shared/lib/modelTemplates';
+import { isClaudeCodeConfigured } from '@server/aiServer/claudeCodeAgent';
+import { expandSlashCommand } from '@server/aiServer/slashCommands';
 
 export const aiRouter = router({
+  // Reports whether the owner has wired up the Claude Code subscription.
+  // Surfaced on the /ai page so team members get a clear error state when
+  // the token isn't configured rather than an opaque 500.
+  claudeCodeStatus: authProcedure
+    .query(async () => {
+      return {
+        configured: isClaudeCodeConfigured(),
+      };
+    }),
+
   embeddingUpsert: authProcedure
     .input(z.object({
       id: z.number(),
@@ -59,6 +73,192 @@ export const aiRouter = router({
       } catch (error) {
         return { ok: false, msg: error?.message }
       }
+    }),
+
+  // BouldHQ assistant chat. Each call persists the user message + AI reply
+  // into the existing conversation/message tables, tagged with
+  // metadata.kind='assistant' so we can list/delete just these chats from a
+  // sidebar without dragging in the broader Blinko completions history.
+  assistantChat: authProcedure
+    .input(z.object({
+      message: z.string().min(1),
+      history: z.array(z.object({
+        role: z.enum(['user', 'assistant']),
+        content: z.string(),
+      })).default([]),
+      conversationId: z.number().optional(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      try {
+        const accountId = Number(ctx.id);
+        const agent = await AiModelFactory.BouldHqAssistantAgent();
+        // Slash commands (e.g. /report joon) are expanded into a longer
+        // instruction here so the agent gets a deterministic prompt.
+        // The ORIGINAL user message is what we save to history.
+        const effectiveMessage = expandSlashCommand(input.message);
+
+        // Resolve or create the conversation row first so we always have an
+        // id to attach messages to.
+        let conversationId = input.conversationId;
+        let isNewConversation = false;
+        if (conversationId) {
+          const existing = await prisma.conversation.findUnique({
+            where: { id: conversationId },
+            select: { accountId: true },
+          });
+          if (!existing || existing.accountId !== accountId) {
+            throw new TRPCError({ code: 'NOT_FOUND', message: 'Conversation not found' });
+          }
+        } else {
+          const title = input.message.length > 60
+            ? input.message.slice(0, 57) + '…'
+            : input.message;
+          const created = await prisma.conversation.create({
+            data: { title, accountId },
+            select: { id: true },
+          });
+          conversationId = created.id;
+          isNewConversation = true;
+        }
+
+        const messages = [
+          ...input.history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+          { role: 'user' as const, content: effectiveMessage },
+        ];
+        const runtimeContext = new RuntimeContext();
+        runtimeContext.set('accountId', accountId);
+        const result = await agent.generate(messages, { runtimeContext });
+
+        const toolCalls = (result.toolCalls ?? []).map((tc: any) => ({
+          tool: tc.toolName,
+          args: tc.args,
+        }));
+        const toolResults = (result.toolResults ?? []).map((tr: any) => ({
+          tool: tr.toolName,
+          result: tr.result,
+        }));
+
+        // Persist both turns. Store the ORIGINAL user message (pre-expansion)
+        // so the history list reads the way the user typed it.
+        await prisma.message.create({
+          data: {
+            conversationId,
+            role: 'user',
+            content: input.message,
+            metadata: { kind: 'assistant' },
+          },
+        });
+        await prisma.message.create({
+          data: {
+            conversationId,
+            role: 'assistant',
+            content: result.text ?? '',
+            metadata: { kind: 'assistant', toolCalls },
+          },
+        });
+
+        // Touch the conversation so list ordering by updatedAt works.
+        await prisma.conversation.update({
+          where: { id: conversationId },
+          data: { updatedAt: new Date() },
+        });
+
+        return {
+          text: result.text ?? '',
+          toolCalls,
+          toolResults,
+          conversationId,
+          isNewConversation,
+        };
+      } catch (err: any) {
+        if (err instanceof TRPCError) throw err;
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: err?.message ?? 'Assistant call failed',
+        });
+      }
+    }),
+
+  // List the caller's assistant conversations, newest first. Filters by
+  // message metadata so we don't surface unrelated Blinko-side conversations.
+  listAssistantConversations: authProcedure
+    .input(z.object({
+      page: z.number().default(1),
+      size: z.number().default(30),
+    }).optional())
+    .query(async ({ input, ctx }) => {
+      const page = input?.page ?? 1;
+      const size = input?.size ?? 30;
+      const accountId = Number(ctx.id);
+      const conversations = await prisma.conversation.findMany({
+        where: {
+          accountId,
+          messages: {
+            some: { metadata: { path: ['kind'], equals: 'assistant' } },
+          },
+        },
+        skip: (page - 1) * size,
+        take: size,
+        orderBy: { updatedAt: 'desc' },
+        select: {
+          id: true,
+          title: true,
+          createdAt: true,
+          updatedAt: true,
+          _count: { select: { messages: true } },
+        },
+      });
+      return conversations.map((c) => ({
+        id: c.id,
+        title: c.title || '(untitled)',
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt,
+        messageCount: c._count.messages,
+      }));
+    }),
+
+  // Load a single assistant conversation's full message list. Used when the
+  // user clicks a row in the history sidebar.
+  getAssistantConversation: authProcedure
+    .input(z.object({ id: z.number() }))
+    .query(async ({ input, ctx }) => {
+      const accountId = Number(ctx.id);
+      const conv = await prisma.conversation.findFirst({
+        where: { id: input.id, accountId },
+        include: { messages: { orderBy: { createdAt: 'asc' } } },
+      });
+      if (!conv) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Conversation not found' });
+      }
+      return {
+        id: conv.id,
+        title: conv.title,
+        createdAt: conv.createdAt,
+        updatedAt: conv.updatedAt,
+        messages: conv.messages.map((m) => ({
+          id: m.id,
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+          createdAt: m.createdAt,
+          toolCalls: ((m.metadata as any)?.toolCalls ?? []) as Array<{ tool: string; args?: any }>,
+        })),
+      };
+    }),
+
+  deleteAssistantConversation: authProcedure
+    .input(z.object({ id: z.number() }))
+    .mutation(async ({ input, ctx }) => {
+      const accountId = Number(ctx.id);
+      const conv = await prisma.conversation.findFirst({
+        where: { id: input.id, accountId },
+        select: { id: true },
+      });
+      if (!conv) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Conversation not found' });
+      }
+      await prisma.message.deleteMany({ where: { conversationId: conv.id } });
+      await prisma.conversation.delete({ where: { id: conv.id } });
+      return { success: true };
     }),
 
   completions: authProcedure
@@ -372,10 +572,24 @@ export const aiRouter = router({
       config: z.any().optional(),
       sortOrder: z.number().default(0)
     }))
-    .mutation(async ({ input }) => {
-      return await prisma.aiProviders.create({
+    .mutation(async ({ ctx, input }) => {
+      const created = await prisma.aiProviders.create({
         data: input,
         include: { models: true }
+      });
+      // Auto-populate models when a key is present so the user sees the
+      // catalogue immediately. Best-effort: a wrong key shouldn't block the
+      // provider being saved.
+      if (input.apiKey || input.provider.toLowerCase() === 'ollama') {
+        try {
+          await userCaller(ctx).ai.fetchProviderModels({ providerId: created.id });
+        } catch (err) {
+          console.warn('[ai.createProvider] auto-fetch models failed', err);
+        }
+      }
+      return await prisma.aiProviders.findUnique({
+        where: { id: created.id },
+        include: { models: true },
       });
     }),
 
@@ -389,12 +603,25 @@ export const aiRouter = router({
       config: z.any().optional(),
       sortOrder: z.number().optional()
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
-      return await prisma.aiProviders.update({
+      const updated = await prisma.aiProviders.update({
         where: { id },
         data,
         include: { models: true }
+      });
+      // Re-fetch the catalogue whenever the key or base URL changes — those
+      // are the only inputs that affect what the provider returns.
+      if (data.apiKey !== undefined || data.baseURL !== undefined) {
+        try {
+          await userCaller(ctx).ai.fetchProviderModels({ providerId: id });
+        } catch (err) {
+          console.warn('[ai.updateProvider] auto-fetch models failed', err);
+        }
+      }
+      return await prisma.aiProviders.findUnique({
+        where: { id },
+        include: { models: true },
       });
     }),
 
@@ -639,15 +866,23 @@ export const aiRouter = router({
           }
 
           case 'anthropic': {
-            // Static list - Anthropic doesn't provide a list models API
-            modelList = [
-              { id: 'claude-3-5-sonnet-20241022', name: 'claude-3-5-sonnet-20241022', capabilities: inferModelCapabilities('claude-3-5-sonnet-20241022') },
-              { id: 'claude-3-5-sonnet-20240620', name: 'claude-3-5-sonnet-20240620', capabilities: inferModelCapabilities('claude-3-5-sonnet-20240620') },
-              { id: 'claude-3-5-haiku-20241022', name: 'claude-3-5-haiku-20241022', capabilities: inferModelCapabilities('claude-3-5-haiku-20241022') },
-              { id: 'claude-3-opus-20240229', name: 'claude-3-opus-20240229', capabilities: inferModelCapabilities('claude-3-opus-20240229') },
-              { id: 'claude-3-sonnet-20240229', name: 'claude-3-sonnet-20240229', capabilities: inferModelCapabilities('claude-3-sonnet-20240229') },
-              { id: 'claude-3-haiku-20240307', name: 'claude-3-haiku-20240307', capabilities: inferModelCapabilities('claude-3-haiku-20240307') }
-            ];
+            // Anthropic added /v1/models in late 2024. Returns the up-to-date
+            // model catalogue so new releases (Sonnet 4.x, Opus 4.x, Haiku 4.x)
+            // appear automatically without code edits.
+            const endpoint = provider.baseURL || 'https://api.anthropic.com/v1';
+            const response = await proxiedFetch(`${endpoint}/models?limit=1000`, {
+              headers: {
+                'x-api-key': provider.apiKey || '',
+                'anthropic-version': '2023-06-01',
+              },
+            });
+            const data = await response.json() as any;
+            modelList = data.data?.map((model: any) => ({
+              id: model.id,
+              name: model.display_name || model.id,
+              description: '',
+              capabilities: inferModelCapabilities(model.id),
+            })) || [];
             break;
           }
 

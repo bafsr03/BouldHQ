@@ -1,12 +1,15 @@
-import { router, authProcedure } from '@server/middleware';
+import { router, authProcedure, teamMemberProcedure } from '@server/middleware';
 import { z } from 'zod';
 import { prisma } from '@server/prisma';
 import {
   seedDefaultResourceFolders,
   ensureBrandingFolderForTag,
   ensureWeeklyTrackerNote,
+  ensureWeeklyTrackerNoteForTeam,
   countMonthlyCheckup,
+  countMonthlyCheckupForTeam,
   countNewStoresThisMonth,
+  countNewStoresThisMonthForTeam,
   backfillBrandingFoldersForAllTags,
   routeAttachmentToBrandingFolder,
 } from '@server/lib/bouldhq';
@@ -31,22 +34,60 @@ export const bouldhqRouter = router({
       return { ok: true };
     }),
 
-  monthlyCheckup: authProcedure
+  // Team-scoped: every team member sees the same numbers. Falls back to the
+  // caller's own counts only if they aren't on a team.
+  monthlyCheckup: teamMemberProcedure
     .input(z.void())
     .output(z.object({ reviewed: z.number(), total: z.number() }))
-    .query(async ({ ctx }) => countMonthlyCheckup(Number(ctx.id))),
+    .query(async ({ ctx }) => countMonthlyCheckupForTeam(ctx.teamId)),
 
-  newStoresThisMonth: authProcedure
+  newStoresThisMonth: teamMemberProcedure
     .input(z.void())
     .output(z.object({ count: z.number() }))
-    .query(async ({ ctx }) => ({ count: await countNewStoresThisMonth(Number(ctx.id)) })),
+    .query(async ({ ctx }) => ({ count: await countNewStoresThisMonthForTeam(ctx.teamId) })),
 
-  refreshWeeklyTracker: authProcedure
+  refreshWeeklyTracker: teamMemberProcedure
     .input(z.void())
     .output(z.object({ ok: z.boolean() }))
     .mutation(async ({ ctx }) => {
-      await ensureWeeklyTrackerNote(Number(ctx.id));
+      await ensureWeeklyTrackerNoteForTeam(ctx.teamId);
       return { ok: true };
+    }),
+
+  // BouldHQ Phase 8 — surface system-generated notes (weekly tracker, etc.) on
+  // /hq. Team-scoped: every member sees the same notes for their active team.
+  systemNotes: teamMemberProcedure
+    .input(z.void())
+    .output(z.array(z.object({
+      id: z.number(),
+      content: z.string(),
+      kind: z.string().nullable(),
+      isTop: z.boolean(),
+      createdAt: z.date(),
+      updatedAt: z.date(),
+    })))
+    .query(async ({ ctx }) => {
+      // Refresh on read so the number isn't stale between weekly cron runs.
+      await ensureWeeklyTrackerNoteForTeam(ctx.teamId);
+      const rows = await prisma.notes.findMany({
+        where: {
+          isRecycle: false,
+          metadata: { path: ['bouldhqSystem'], equals: true } as any,
+          AND: [
+            { metadata: { path: ['teamId'], equals: ctx.teamId } as any },
+          ],
+        },
+        orderBy: [{ isTop: 'desc' }, { updatedAt: 'desc' }],
+        take: 20,
+      });
+      return rows.map((n) => ({
+        id: n.id,
+        content: n.content,
+        kind: (n.metadata as any)?.kind ?? null,
+        isTop: n.isTop,
+        createdAt: n.createdAt,
+        updatedAt: n.updatedAt,
+      }));
     }),
 
   // Route an uploaded attachment (looked up by its file path) into Branding Assets/<tagName>/.

@@ -42,19 +42,9 @@ export const useInitialHotkeySetup = () => {
         
         console.log('Setting up initial hotkeys with config:', finalConfig);
         
-        // Register quicknote shortcut if enabled
-        if (finalConfig.enabled) {
-          try {
-            await invoke('register_hotkey', {
-              shortcut: finalConfig.quickNote,
-              command: 'quicknote'
-            });
-            console.log('Initial registration - quicknote shortcut:', finalConfig.quickNote);
-          } catch (error) {
-            console.warn('Failed to register initial quicknote shortcut:', error);
-          }
-        }
-        
+        // QuickNote hotkey intentionally disabled.
+
+
         // Register quickai shortcut if enabled
         if (finalConfig.aiEnabled) {
           try {

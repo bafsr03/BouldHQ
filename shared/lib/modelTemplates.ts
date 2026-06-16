@@ -169,16 +169,79 @@ export const DEFAULT_MODEL_TEMPLATES: ModelTemplate[] = [
   { modelKey: 'rerank-lite-1', title: 'Rerank Lite 1', capabilities: { rerank: true } }
 ];
 
+// Pattern-based capability inference so future model releases (Claude 4.x,
+// GPT-5, Gemini 2.5, etc.) get correct capabilities without code edits.
+// Matches BEFORE the template substring search so anything obviously new
+// resolves cleanly even if its slug isn't in DEFAULT_MODEL_TEMPLATES.
+type PatternRule = {
+  match: RegExp;
+  caps: Partial<ModelCapabilities>;
+};
+
+const PATTERN_RULES: PatternRule[] = [
+  // Embeddings — must match first so an "embedding" model never gets `inference: true`.
+  { match: /(^|[-_/])(text-embedding|embed|embedding|voyage|rerank-lite|gecko)/, caps: { embedding: true } },
+  { match: /(^|[-_/])rerank/, caps: { rerank: true } },
+
+  // Image generation
+  { match: /(dall-?e|gpt-image|imagen|stable-?diffusion|sdxl|flux|midjourney)/, caps: { imageGeneration: true } },
+
+  // Audio (TTS + STT)
+  { match: /(^|[-_/])(tts|whisper|speech|voice)/, caps: { audio: true, inference: false } },
+
+  // Anthropic Claude — any sonnet/opus/haiku family (3.x, 4.x, 5.x+).
+  { match: /claude.*(sonnet|opus|haiku)|claude-(3|4|5|6)/,
+    caps: { inference: true, tools: true, image: true } },
+
+  // OpenAI GPT-4/5/o-series + chatgpt-* — all multimodal + tools.
+  { match: /(^|[-_/])(gpt-4|gpt-5|gpt-6|chatgpt|^o[1-9]|^o1-|^o3-|^o4-)/,
+    caps: { inference: true, tools: true, image: true } },
+
+  // GPT-3.5 — tools yes, vision no.
+  { match: /gpt-?3\.?5/, caps: { inference: true, tools: true } },
+
+  // Google Gemini — 1.5+/2.x families are multimodal.
+  { match: /gemini-?(1\.[5-9]|2|3|4)/, caps: { inference: true, tools: true, image: true, video: true, audio: true } },
+  { match: /gemini/, caps: { inference: true, tools: true } },
+
+  // Meta Llama 3+ and Mistral — text + tools (some have vision but treat as text by default).
+  { match: /(llama-?3|llama-?4|mistral-large|mixtral)/, caps: { inference: true, tools: true } },
+
+  // DeepSeek
+  { match: /deepseek/, caps: { inference: true, tools: true } },
+
+  // xAI Grok
+  { match: /grok/, caps: { inference: true, tools: true, image: true } },
+];
+
+function emptyCaps(): ModelCapabilities {
+  return {
+    inference: false, tools: false, image: false, imageGeneration: false,
+    video: false, audio: false, embedding: false, rerank: false,
+  };
+}
+
+function mergeCaps(base: ModelCapabilities, add: Partial<ModelCapabilities>): ModelCapabilities {
+  return {
+    inference: add.inference ?? base.inference,
+    tools: add.tools ?? base.tools,
+    image: add.image ?? base.image,
+    imageGeneration: add.imageGeneration ?? base.imageGeneration,
+    video: add.video ?? base.video,
+    audio: add.audio ?? base.audio,
+    embedding: add.embedding ?? base.embedding,
+    rerank: add.rerank ?? base.rerank,
+  };
+}
+
 // Helper function to infer model capabilities from model name
 export function inferModelCapabilities(modelName: string): ModelCapabilities {
   const name = modelName.toLowerCase();
-  const template = DEFAULT_MODEL_TEMPLATES.find(t =>
-    name.includes(t.modelKey.toLowerCase()) ||
-    t.modelKey.toLowerCase().includes(name)
-  );
 
+  // 1) Exact template hit wins (preserves legacy behavior for known IDs).
+  const template = DEFAULT_MODEL_TEMPLATES.find(t => t.modelKey.toLowerCase() === name);
   if (template) {
-    return {
+    return mergeCaps(emptyCaps(), {
       inference: template.capabilities.inference || false,
       tools: template.capabilities.tools || false,
       image: template.capabilities.image || false,
@@ -186,19 +249,34 @@ export function inferModelCapabilities(modelName: string): ModelCapabilities {
       video: template.capabilities.video || false,
       audio: template.capabilities.audio || false,
       embedding: template.capabilities.embedding || false,
-      rerank: template.capabilities.rerank || false
-    };
+      rerank: template.capabilities.rerank || false,
+    });
   }
 
-  // Default: unknown models assumed to have inference capability
-  return {
-    inference: true,
-    tools: false,
-    image: false,
-    imageGeneration: false,
-    video: false,
-    audio: false,
-    embedding: false,
-    rerank: false
-  };
+  // 2) Pattern rules — first match wins. Handles new releases automatically.
+  for (const rule of PATTERN_RULES) {
+    if (rule.match.test(name)) {
+      return mergeCaps(emptyCaps(), { inference: true, ...rule.caps });
+    }
+  }
+
+  // 3) Template fuzzy match (the old behavior) as a last resort.
+  const fuzzy = DEFAULT_MODEL_TEMPLATES.find(t =>
+    name.includes(t.modelKey.toLowerCase()) || t.modelKey.toLowerCase().includes(name)
+  );
+  if (fuzzy) {
+    return mergeCaps(emptyCaps(), {
+      inference: fuzzy.capabilities.inference || false,
+      tools: fuzzy.capabilities.tools || false,
+      image: fuzzy.capabilities.image || false,
+      imageGeneration: fuzzy.capabilities.imageGeneration || false,
+      video: fuzzy.capabilities.video || false,
+      audio: fuzzy.capabilities.audio || false,
+      embedding: fuzzy.capabilities.embedding || false,
+      rerank: fuzzy.capabilities.rerank || false,
+    });
+  }
+
+  // 4) Default: unknown text models assumed to have inference capability.
+  return { ...emptyCaps(), inference: true };
 }

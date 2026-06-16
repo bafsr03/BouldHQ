@@ -10,14 +10,25 @@ export const tagRouter = router({
     .input(z.void())
     .output(z.array(tagSchema))
     .query(async function ({ ctx }) {
+      // BouldHQ: a tag is visible if the user owns it personally (legacy) OR if it
+      // belongs to a team the user is a member of (team-scoped store tags).
+      // Archived stores are excluded from this default list — they appear only
+      // in the explicit "show archived" view on /stores.
+      const teamIds = (await prisma.teamMember.findMany({
+        where: { accountId: Number(ctx.id) },
+        select: { teamId: true },
+      })).map(m => m.teamId);
+
       const tags = await prisma.tag.findMany({
         where: {
-          accountId: Number(ctx.id)
+          archivedAt: null,
+          OR: [
+            { accountId: Number(ctx.id) },
+            ...(teamIds.length ? [{ teamId: { in: teamIds } }] : []),
+          ],
         },
-        orderBy: {
-          sortOrder: 'asc'
-        },
-        distinct: ['id']
+        orderBy: { sortOrder: 'asc' },
+        distinct: ['id'],
       });
       return tags;
     }),

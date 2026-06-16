@@ -12,11 +12,20 @@ import { Icon } from '@/components/Common/Iconify/icons'
 import { ScrollArea } from '@/components/Common/ScrollArea'
 import { AnalyticsCounters } from '@/components/BouldHQ/AnalyticsCounters'
 import { api } from '@/lib/trpc'
+import { useTeamRole } from '@/lib/useTeamRole'
+import { Navigate } from 'react-router-dom'
 
 const Analytics = observer(() => {
   const analyticsStore = RootStore.Get(AnalyticsStore)
   const { t } = useTranslation()
   const [selectedMonth, setSelectedMonth] = React.useState(dayjs().format("YYYY-MM"))
+  const role = useTeamRole()
+
+  // Founders only. While the role is still loading (`undefined`) we render
+  // nothing to avoid a flash of the analytics page before the redirect kicks in.
+  if (role === undefined) return null
+  if (role !== 'founder') return <Navigate to="/hq" replace />
+
   analyticsStore.use()
 
   useEffect(() => {

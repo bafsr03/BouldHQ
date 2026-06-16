@@ -1,5 +1,5 @@
 import { observer } from "mobx-react-lite";
-import Hub from "../hub";
+import HQ from "../hq";
 import { useEffect } from "react";
 
 const Share = observer(() => {
@@ -8,7 +8,7 @@ const Share = observer(() => {
   }, [])
 
   return <div className="flex flex-col h-[100vh] w-full bg-secondbackground" >
-    <Hub />
+    <HQ />
   </div>
 });
 

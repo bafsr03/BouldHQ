@@ -1,6 +1,6 @@
 import { prisma } from "../prisma";
 import { BaseScheduleJob } from "./baseScheduleJob";
-import { ensureWeeklyTrackerNote } from "../lib/bouldhq";
+import { ensureWeeklyTrackerNoteForTeam } from "../lib/bouldhq";
 
 export class WeeklyTrackerJob extends BaseScheduleJob {
   protected static taskName = 'bouldhq-weekly-tracker';
@@ -8,14 +8,14 @@ export class WeeklyTrackerJob extends BaseScheduleJob {
   protected static cronSchedule = '5 0 * * 1';
 
   protected static async RunTask() {
-    const accounts = await prisma.accounts.findMany({ select: { id: true } });
-    for (const a of accounts) {
+    const teams = await prisma.team.findMany({ select: { id: true } });
+    for (const t of teams) {
       try {
-        await ensureWeeklyTrackerNote(a.id);
+        await ensureWeeklyTrackerNoteForTeam(t.id);
       } catch (err) {
-        console.error(`[bouldhq-weekly-tracker] account ${a.id} failed`, err);
+        console.error(`[bouldhq-weekly-tracker] team ${t.id} failed`, err);
       }
     }
-    return { processed: accounts.length };
+    return { processed: teams.length };
   }
 }
