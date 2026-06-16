@@ -43,6 +43,8 @@ const StoresPage = lazy(() => import('./pages/stores'));
 const StoreDetailPage = lazy(() => import('./pages/stores/[tagId]'));
 const NewStorePage = lazy(() => import('./pages/stores/new'));
 const NewStoreWizardPage = lazy(() => import('./pages/stores/new-wizard'));
+const OwnerLoginPage = lazy(() => import('./pages/owner/login'));
+const OwnerDashboardPage = lazy(() => import('./pages/owner'));
 const AIPage = lazy(() => import('./pages/ai'));
 const ResourcesPage = lazy(() => import('./pages/resources'));
 const ReviewPage = lazy(() => import('./pages/review'));
