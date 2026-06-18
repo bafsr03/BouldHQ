@@ -4,9 +4,9 @@ networks:
 
 services:
   blinko-website:
-    # Pull the pre-built image from GHCR (built by CI on every push to main).
-    # To update: docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d
-    image: ghcr.io/bafsr03/bouldhq:latest
+    build:
+      context: .
+      dockerfile: ./dockerfile
     # container_name: blinko-website
     environment:
       NODE_ENV: production
