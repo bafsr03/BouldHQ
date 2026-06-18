@@ -45,9 +45,16 @@ export const announcementRouter = router({
       });
       const teamIds = memberships.map((m) => m.teamId);
 
+      // Check if caller is a founder on any of their teams — founders see everything.
+      const isFounder = await prisma.teamMember.findFirst({
+        where: { accountId: Number(ctx.id), role: 'founder', teamId: { in: teamIds } },
+      });
+
       const rows = await prisma.announcement.findMany({
         where: {
-          ownersOnly: false,   // owner-only posts are hidden from the staff /hq feed
+          // Founders see all posts (including store-owner-only ones).
+          // Staff (manager/salesman) only see non-ownersOnly posts.
+          ...(isFounder ? {} : { ownersOnly: false }),
           ...(input.category && { category: input.category }),
           OR: [
             { teamId: null },
