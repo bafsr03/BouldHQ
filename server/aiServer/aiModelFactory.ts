@@ -380,16 +380,16 @@ ${slashCommandsForPrompt()}
 
 HTML REPORT TEMPLATE — when /report fires, produce a SELF-CONTAINED HTML document using this exact skeleton. Inline CSS only. No external stylesheets, no external scripts.
 
-BRAND PALETTE (use the CSS variables, do not hardcode hex values elsewhere):
-  • --brand-primary  #2B3674   navy — primary text + headings
-  • --brand-accent   #8B5CF6   BouldHQ violet — pills, links, hairline accents
-  • --brand-success  #05CD99   green — positive metric deltas, "on track" status
-  • --bg             #F4F7FE   page background (subtle lavender)
-  • --surface        #FFFFFF   card background
-  • --border         #E6DDFE   soft lavender card border
-  • --text           #0F0F19   body text
-  • --muted          #6B7280   secondary text
-  • --hairline       #E5E7EB   subtle dividers
+BRAND PALETTE — dark mode (use the CSS variables, do not hardcode hex values elsewhere):
+  • --brand-primary  #A5B4FC   periwinkle — headings and section labels on dark
+  • --brand-accent   #A78BFA   BouldHQ violet — pills, links, accents
+  • --brand-success  #34D399   emerald green — positive metric deltas, "on track" status
+  • --bg             #0C0C1D   page background (very dark navy)
+  • --surface        #13132C   card background
+  • --border         #252554   dark navy/indigo card border
+  • --text           #E8E8F8   body text (near-white)
+  • --muted          #8890B4   secondary text
+  • --hairline       #1C1C3E   subtle dark dividers
 
 HEADER must be co-branded:
   [BouldHQ logo image] × [STORE LOGO image OR store name pill]
@@ -406,18 +406,19 @@ Skeleton (replace every {{TOKEN}}; never invent metrics — for missing data wri
 <html lang="en">
 <head>
 <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>{{STORE}} — Weekly Report — {{DATE}}</title>
 <style>
   :root {
-    --brand-primary: #2B3674;
-    --brand-accent:  #8B5CF6;
-    --brand-success: #05CD99;
-    --bg:            #F4F7FE;
-    --surface:       #FFFFFF;
-    --border:        #E6DDFE;
-    --text:          #0F0F19;
-    --muted:         #6B7280;
-    --hairline:      #E5E7EB;
+    --brand-primary: #A5B4FC;
+    --brand-accent:  #A78BFA;
+    --brand-success: #34D399;
+    --bg:            #0C0C1D;
+    --surface:       #13132C;
+    --border:        #252554;
+    --text:          #E8E8F8;
+    --muted:         #8890B4;
+    --hairline:      #1C1C3E;
     --radius:        14px;
     --maxw:          920px;
   }
@@ -425,7 +426,7 @@ Skeleton (replace every {{TOKEN}}; never invent metrics — for missing data wri
   body { margin: 0; background: var(--bg); color: var(--text);
          font-family: -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif;
          font-feature-settings: 'cv11', 'ss01';
-         -webkit-font-smoothing: antialiased; }
+         -webkit-font-smoothing: antialiased; color-scheme: dark; }
   .wrap { max-width: var(--maxw); margin: 0 auto; padding: 56px 28px 80px; }
 
   /* --- Co-branded header --- */
@@ -437,18 +438,15 @@ Skeleton (replace every {{TOKEN}}; never invent metrics — for missing data wri
   .cobrand-marks {
     display: flex; align-items: center; gap: 18px;
     font-weight: 700; font-size: 22px; letter-spacing: -0.02em;
-    color: var(--brand-primary);
+    color: var(--text);
   }
   .cobrand-marks .bouldhq-mark {
     height: 28px; width: auto; display: block;
-    /* The BouldHQ wordmark ships white-on-transparent — inverted so it
-       reads on the lavender card background. */
-    filter: invert(1) brightness(0.18);
   }
   .cobrand-marks .store-mark {
-    height: 32px; width: auto; display: block;
+    height: 36px; width: auto; display: block;
     border-radius: 6px;
-    background: var(--surface);
+    background: #1e1e3a;
     border: 1px solid var(--border);
     padding: 4px 8px;
   }
@@ -457,7 +455,7 @@ Skeleton (replace every {{TOKEN}}; never invent metrics — for missing data wri
     transform: translateY(-1px);
   }
   .cobrand-marks .store {
-    color: var(--brand-primary);
+    color: var(--brand-accent);
     border: 1px solid var(--border);
     background: var(--surface);
     padding: 4px 14px; border-radius: 999px;
@@ -472,10 +470,10 @@ Skeleton (replace every {{TOKEN}}; never invent metrics — for missing data wri
   .pill {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 4px 12px; border-radius: 999px;
-    background: rgba(139, 92, 246, 0.12); color: var(--brand-accent);
+    background: rgba(167, 139, 250, 0.18); color: var(--brand-accent);
     font-size: 12px; font-weight: 600; letter-spacing: 0.01em;
   }
-  .pill.success { background: rgba(5, 205, 153, 0.14); color: var(--brand-success); }
+  .pill.success { background: rgba(52, 211, 153, 0.18); color: var(--brand-success); }
 
   /* --- Cards --- */
   section.card {
@@ -484,7 +482,7 @@ Skeleton (replace every {{TOKEN}}; never invent metrics — for missing data wri
     border-radius: var(--radius);
     padding: 22px 26px;
     margin-bottom: 16px;
-    box-shadow: 0 1px 2px rgba(43, 54, 116, 0.04);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
   }
   section.card h2 {
     font-size: 16px; font-weight: 700; margin: 0 0 14px;
@@ -509,7 +507,7 @@ Skeleton (replace every {{TOKEN}}; never invent metrics — for missing data wri
   .metric .value { font-size: 24px; font-weight: 700; letter-spacing: -0.01em; margin-top: 4px; color: var(--text); }
   .metric .delta { font-size: 12px; font-weight: 600; margin-top: 2px; }
   .metric .delta.up { color: var(--brand-success); }
-  .metric .delta.down { color: #DC2626; }
+  .metric .delta.down { color: #F87171; }
 
   /* --- Misc --- */
   .placeholder { color: var(--muted); font-style: italic; }
@@ -518,8 +516,31 @@ Skeleton (replace every {{TOKEN}}; never invent metrics — for missing data wri
     margin-top: 48px; padding-top: 20px;
     border-top: 1px solid var(--hairline);
   }
-  footer .footer-mark { display: inline-flex; align-items: center; gap: 6px; color: var(--brand-primary); font-weight: 600; }
-  footer .footer-mark img { height: 14px; width: auto; filter: invert(1) brightness(0.18); }
+  footer .footer-mark { display: inline-flex; align-items: center; gap: 6px; color: var(--text); font-weight: 600; }
+  footer .footer-mark img { height: 14px; width: auto; }
+
+  /* --- Mobile (<= 640px) --- */
+  @media (max-width: 640px) {
+    .wrap { padding: 28px 14px 48px; }
+    h1 { font-size: 26px; }
+    header.cobrand { flex-direction: column; align-items: flex-start; gap: 14px; }
+    header .meta { text-align: left; }
+    .cobrand-marks { gap: 12px; font-size: 18px; flex-wrap: wrap; }
+    .cobrand-marks .bouldhq-mark { height: 24px; }
+    .cobrand-marks .store-mark { height: 30px; }
+    section.card { padding: 18px 16px; }
+    section.card h2 { font-size: 13px; }
+    /* Stacked table cards: header row hidden, each row becomes a card */
+    table, thead, tbody, tr, th, td { display: block; }
+    table { border: none; }
+    thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    tr { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; background: var(--surface); }
+    td { border-bottom: none; padding: 5px 0; font-size: 13px; line-height: 1.5; }
+    td:first-child { font-weight: 600; padding-bottom: 8px; color: var(--brand-primary); border-bottom: 1px solid var(--hairline); margin-bottom: 8px; }
+    /* Metrics grid stacks on mobile */
+    .metrics { grid-template-columns: 1fr; }
+    .metric .value { font-size: 22px; }
+  }
 </style>
 </head>
 <body>

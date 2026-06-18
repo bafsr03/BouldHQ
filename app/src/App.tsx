@@ -132,6 +132,10 @@ const ProtectedRoute = ({ children }) => {
     return <LoadingPage />;
   }
 
+  if (userStore.role === 'brand_owner') {
+    return <Navigate to="/owner" replace />;
+  }
+
   return children;
 };
 

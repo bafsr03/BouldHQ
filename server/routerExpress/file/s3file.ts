@@ -6,6 +6,7 @@ import sharp from "sharp";
 import mime from "mime-types";
 import { getTokenFromRequest } from "../../lib/helper";
 import { prisma } from "../../prisma";
+import { hasNoteAccessByTeamOrBrand } from "../../lib/fileAccess";
 
 const router = express.Router();
 
@@ -131,6 +132,7 @@ router.get(/.*/, async (req: Request, res: Response) => {
           include: {
             note: {
               select: {
+                id: true,
                 isShare: true,
                 accountId: true
               }
@@ -151,12 +153,18 @@ router.get(/.*/, async (req: Request, res: Response) => {
           }
         } else {
           // Check if user owns the file or the note containing the file
-          const isOwner = myFile.accountId === Number(token.id) || 
+          const isOwner = myFile.accountId === Number(token.id) ||
                           myFile.note?.accountId === Number(token.id) ||
                           token.role === 'superadmin';
-          
+
           if (!myFile.note?.isShare && !isOwner) {
-            return res.status(401).json({ error: "Unauthorized" });
+            // Per-account check failed — try team/brand scoping before denying.
+            const ok = myFile.note
+              ? await hasNoteAccessByTeamOrBrand(myFile.note.id, Number(token.id), token.role)
+              : false;
+            if (!ok) {
+              return res.status(401).json({ error: "Unauthorized" });
+            }
           }
         }
       } catch (error) {

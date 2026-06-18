@@ -32,7 +32,11 @@ export function HtmlPreviewModal({ isOpen, onClose, fileName, filePath }: Props)
     setError(null);
     setBlobUrl('');
     axiosInstance
-      .get(getBlinkoEndpoint(filePath), { responseType: 'text', transformResponse: [(d) => d] })
+      .get(`${getBlinkoEndpoint(filePath)}?_t=${Date.now()}`, {
+        responseType: 'text',
+        transformResponse: [(d) => d],
+        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+      })
       .then((res) => {
         if (cancelled) return;
         const body = typeof res.data === 'string' ? res.data : String(res.data ?? '');
@@ -93,7 +97,7 @@ export function HtmlPreviewModal({ isOpen, onClose, fileName, filePath }: Props)
               sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
               referrerPolicy="no-referrer"
               className="w-full"
-              style={{ height: '78vh', border: 'none', background: 'white' }}
+              style={{ height: '78vh', border: 'none', background: 'transparent' }}
             />
           )}
         </ModalBody>

@@ -81,3 +81,68 @@ export function buildMagicLinkUrl(rawToken: string, base?: string): string {
     || 'https://hq.bouldhq.com';
   return `${root.replace(/\/+$/, '')}/owner/login?token=${encodeURIComponent(rawToken)}`;
 }
+
+// Same as above but for the credentials-based login (no token in URL). The
+// merchant can bookmark this and sign in any time with the username + password
+// the staff shared with them.
+export function buildOwnerLoginUrl(base?: string): string {
+  const root = base
+    || process.env.BOULDHQ_PUBLIC_URL
+    || 'https://hq.bouldhq.com';
+  return `${root.replace(/\/+$/, '')}/owner/login`;
+}
+
+// Generates a memorable username (slugified store name, with collision suffix
+// if needed) and a random readable password. Caller hashes the password before
+// persisting and shows the plaintext to the salesman exactly once.
+//
+// `takenNames` is checked against `accounts.name`. We try the bare slug first
+// so most stores get a clean username like "adophies"; only on collision do we
+// append a short suffix.
+const PASSWORD_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'; // no 0/O/l/1/I
+const USERNAME_ALPHABET = 'abcdefghijkmnpqrstuvwxyz23456789';
+
+function slugifyStoreName(storeName: string): string {
+  return storeName.toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    || 'store';
+}
+
+function randomFromAlphabet(alphabet: string, length: number): string {
+  const bytes = crypto.randomBytes(length);
+  let out = '';
+  for (let i = 0; i < length; i++) {
+    out += alphabet[bytes[i]! % alphabet.length];
+  }
+  return out;
+}
+
+export type GeneratedCredentials = { username: string; password: string };
+
+export function generateBrandOwnerCredentials(
+  storeName: string,
+  isUsernameTaken: (candidate: string) => Promise<boolean>,
+): Promise<GeneratedCredentials> {
+  return (async () => {
+    const base = slugifyStoreName(storeName);
+    let username = base;
+    let attempt = 0;
+    while (await isUsernameTaken(username)) {
+      attempt++;
+      if (attempt > 5) {
+        username = `${base}-${randomFromAlphabet(USERNAME_ALPHABET, 6)}`;
+        break;
+      }
+      username = `${base}-${randomFromAlphabet(USERNAME_ALPHABET, 4)}`;
+    }
+    const password = randomFromAlphabet(PASSWORD_ALPHABET, 16);
+    return { username, password };
+  })();
+}
+
+// Same generator without a username — for password resets where the username
+// stays the same but the password is rolled.
+export function generateBrandOwnerPassword(): string {
+  return randomFromAlphabet(PASSWORD_ALPHABET, 16);
+}

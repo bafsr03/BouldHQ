@@ -172,9 +172,10 @@ model announcement {
   category  String   @db.VarChar(20)  // 'announcement' | 'changelog' | 'workflow_update'
   title     String   @db.VarChar(255)
   body      String   @db.Text
-  pinned    Boolean  @default(false)
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  pinned     Boolean  @default(false)
+  ownersOnly Boolean  @default(false)  // true = only visible in owner portal, hidden from /hq staff feed
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @db.Timestamptz(6)
 
   team   team?    @relation(fields: [teamId], references: [id], onDelete: Cascade)
   author accounts @relation("AnnouncementAuthor", fields: [authorId], references: [id])

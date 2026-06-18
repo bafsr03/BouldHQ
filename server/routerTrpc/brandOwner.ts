@@ -161,4 +161,79 @@ export const brandOwnerRouter = router({
         updatedAt: n.updatedAt,
       }));
     }),
+
+  // Team announcements visible to this brand owner (global + their team's).
+  listAnnouncements: brandOwnerProcedure
+    .input(z.void())
+    .output(z.array(z.object({
+      id: z.number(),
+      title: z.string(),
+      body: z.string(),
+      category: z.string(),
+      pinned: z.boolean(),
+      createdAt: z.date(),
+    })))
+    .query(async ({ ctx }) => {
+      const tag = await prisma.tag.findUnique({
+        where: { id: ctx.tagId },
+        select: { teamId: true },
+      });
+      const rows = await prisma.announcement.findMany({
+        where: tag?.teamId
+          ? { OR: [{ teamId: tag.teamId }, { teamId: null }] }
+          : { teamId: null },
+        orderBy: [{ pinned: 'desc' }, { createdAt: 'desc' }],
+        take: 30,
+        select: { id: true, title: true, body: true, category: true, pinned: true, createdAt: true },
+      });
+      return rows;
+    }),
+
+  // Add a note tagged to the owner's store. Visible to staff in store ops.
+  addNote: brandOwnerProcedure
+    .input(z.object({ content: z.string().min(1) }))
+    .output(z.object({ id: z.number() }))
+    .mutation(async ({ ctx, input }) => {
+      const created = await prisma.notes.create({
+        data: {
+          content: input.content,
+          type: 0,
+          accountId: Number(ctx.id),
+          isArchived: false,
+          isRecycle: false,
+          isShare: false,
+          isTop: false,
+          tags: { create: [{ tagId: ctx.tagId }] },
+        },
+        select: { id: true },
+      });
+      return { id: created.id };
+    }),
+
+  // HTML report files the team has placed in a Branding Assets folder for this store.
+  listMyReports: brandOwnerProcedure
+    .input(z.void())
+    .output(z.array(z.object({
+      id: z.number(),
+      name: z.string(),
+      path: z.string(),
+      perfixPath: z.string().nullable(),
+      updatedAt: z.date(),
+    })))
+    .query(async ({ ctx }) => {
+      const tag = await prisma.tag.findUnique({
+        where: { id: ctx.tagId },
+        select: { name: true },
+      });
+      if (!tag) return [];
+      const rows = await prisma.attachments.findMany({
+        where: {
+          type: 'text/html',
+          perfixPath: { contains: tag.name },
+        },
+        orderBy: { updatedAt: 'desc' },
+        select: { id: true, name: true, path: true, perfixPath: true, updatedAt: true },
+      });
+      return rows;
+    }),
 });

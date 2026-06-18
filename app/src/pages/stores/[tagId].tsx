@@ -12,6 +12,7 @@ import { StoreProfileCard } from '@/components/BouldHQ/StoreProfileCard';
 import { RequestsPanel } from '@/components/BouldHQ/RequestsPanel';
 import { OpsConsole } from '@/components/BouldHQ/OpsConsole';
 import { StoreActions } from '@/components/BouldHQ/StoreActions';
+import { BrandOwnerCard } from '@/components/BouldHQ/BrandOwnerCard';
 import { api } from '@/lib/trpc';
 import { RootStore } from '@/store';
 import { BlinkoStore } from '@/store/blinkoStore';
@@ -118,6 +119,8 @@ const StoreDetail = observer(() => {
         </header>
 
         {tag && <StoreProfileCard tagId={tagId} tagName={tag.name} />}
+
+        {tag && <BrandOwnerCard tagId={tagId} tagName={tag.name} role={teamRole} />}
 
         {tag && <RequestsPanel tagId={tagId} tagName={tag.name} />}
 

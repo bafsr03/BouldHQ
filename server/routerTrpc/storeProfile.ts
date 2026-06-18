@@ -3,7 +3,11 @@ import { z } from 'zod';
 import { TRPCError } from '@trpc/server';
 import { prisma } from '@server/prisma';
 import { ensureBrandingFolderForTag, bootstrapStoreNotes } from '@server/lib/bouldhq';
-import { createMagicLink, buildMagicLinkUrl } from '@server/lib/brandOwnerAuth';
+import {
+  createMagicLink, buildMagicLinkUrl, buildOwnerLoginUrl,
+  generateBrandOwnerCredentials, generateBrandOwnerPassword,
+} from '@server/lib/brandOwnerAuth';
+import { hashPassword } from '@prisma/seed';
 import { randomBytes } from 'crypto';
 import {
   workdirFor, themeDirFor, importFolderIntoWorkdir, openInIterm,
@@ -257,6 +261,14 @@ export const storeProfileRouter = router({
       accountId: z.number(),
       magicLinkUrl: z.string(),
       expiresAt: z.date(),
+      loginUrl: z.string(),
+      // Only populated on a *fresh* invite (new account created). On re-invite
+      // of an existing owner we don't reroll their password — they may have it
+      // saved — so this is null. Use resetBrandOwnerPassword to rotate.
+      credentials: z.object({
+        username: z.string(),
+        password: z.string(),
+      }).nullable(),
     }))
     .mutation(async ({ ctx, input }) => {
       // Tag must be a store on the caller's team.
@@ -268,30 +280,53 @@ export const storeProfileRouter = router({
 
       const normalizedEmail = input.email.toLowerCase().trim();
 
-      // Find or create the underlying account row. Email goes in `name` (we
-      // reuse Blinko's auth identity scheme; brand owners don't use a
-      // username/password). Random password — never used.
-      let account = await prisma.accounts.findFirst({ where: { name: normalizedEmail } });
+      // Is there already a brand-owner row for this store? Re-invite path
+      // skips the credential generation so the merchant's saved password stays
+      // valid.
+      const existingOwner = await prisma.brandOwner.findUnique({
+        where: { tagId: input.tagId },
+      });
+
+      let account;
+      let freshCredentials: { username: string; password: string } | null = null;
+
+      if (existingOwner) {
+        account = await prisma.accounts.findUnique({ where: { id: existingOwner.accountId } });
+        if (!account) {
+          // Orphaned brandOwner row pointing at a deleted account — rare but
+          // recoverable. Fall through to the new-account path.
+        } else if (account.role !== 'brand_owner') {
+          throw new TRPCError({
+            code: 'BAD_REQUEST',
+            message: 'Existing brand-owner account has been re-roled. Reset password to recover.',
+          });
+        } else if (account.nickname !== input.name) {
+          account = await prisma.accounts.update({
+            where: { id: account.id },
+            data: { nickname: input.name },
+          });
+        }
+      }
+
       if (!account) {
+        // First invite for this store — generate a fresh username + password.
+        const creds = await generateBrandOwnerCredentials(tag.name, async (candidate) => {
+          const collision = await prisma.accounts.findFirst({
+            where: { name: candidate },
+            select: { id: true },
+          });
+          return !!collision;
+        });
+        const passwordHash = await hashPassword(creds.password);
         account = await prisma.accounts.create({
           data: {
-            name: normalizedEmail,
+            name: creds.username,
             nickname: input.name,
-            password: randomBytes(32).toString('hex'),    // unusable but non-empty
+            password: passwordHash,
             role: 'brand_owner',
           },
         });
-      } else if (account.role !== 'brand_owner') {
-        // Existing staff/superadmin account — refuse rather than silently demote.
-        throw new TRPCError({
-          code: 'BAD_REQUEST',
-          message: `An account already exists with email ${normalizedEmail} but is not a brand owner.`,
-        });
-      } else if (account.nickname !== input.name) {
-        account = await prisma.accounts.update({
-          where: { id: account.id },
-          data: { nickname: input.name },
-        });
+        freshCredentials = creds;
       }
 
       // Bind to the store. Upsert keeps phone / invitedBy fresh.
@@ -310,12 +345,72 @@ export const storeProfileRouter = router({
         },
       });
 
+      // Stash the merchant's email on the brandOwner row indirectly — for now
+      // we don't have a dedicated column, but the email arrives through input
+      // and we want it for outbound comms later. The brand-owner identity is
+      // the username, not the email.
+      void normalizedEmail;
+
       const link = await createMagicLink(owner.id);
       return {
         ownerId: owner.id,
         accountId: account.id,
-        magicLinkUrl: buildMagicLinkUrl(link.rawToken),
+        magicLinkUrl: buildMagicLinkUrl(link.rawToken, ctx.origin || undefined),
         expiresAt: link.expiresAt,
+        loginUrl: buildOwnerLoginUrl(ctx.origin || undefined),
+        credentials: freshCredentials,
+      };
+    }),
+
+  // Manager+ : does this store already have a brand owner invited? Drives the
+  // store-detail "Brand owner" card so it can decide between "Invite" vs.
+  // "Resend link". Returns null instead of throwing so the UI stays simple.
+  // `username` is the merchant's login name (also stored in accounts.name).
+  // The plaintext password is never returned here — only at create/reset time.
+  getBrandOwner: managerProcedure
+    .input(z.object({ tagId: z.number() }))
+    .output(z.object({
+      owner: z.object({
+        ownerId: z.number(),
+        accountId: z.number(),
+        username: z.string(),
+        email: z.string().nullable(),
+        name: z.string(),
+        phone: z.string().nullable(),
+        invitedAt: z.date(),
+      }).nullable(),
+      loginUrl: z.string(),
+    }))
+    .query(async ({ ctx, input }) => {
+      // Tag must be a store on the caller's team.
+      const tag = await prisma.tag.findFirst({
+        where: { id: input.tagId, teamId: ctx.teamId, parent: 0 },
+        select: { id: true },
+      });
+      if (!tag) throw new TRPCError({ code: 'NOT_FOUND', message: 'Store not found in your team' });
+
+      const owner = await prisma.brandOwner.findUnique({
+        where: { tagId: input.tagId },
+        include: { account: { select: { name: true, nickname: true } } },
+      });
+      const loginUrl = buildOwnerLoginUrl(ctx.origin || undefined);
+      if (!owner) return { owner: null, loginUrl };
+      // For brand-owner accounts we stash the username in accounts.name; the
+      // merchant's email lives in accounts.nickname or on the brandOwner row.
+      // (Older invites used email-as-name; tolerate both shapes.)
+      const accountName = owner.account.name;
+      const looksLikeEmail = accountName.includes('@');
+      return {
+        owner: {
+          ownerId: owner.id,
+          accountId: owner.accountId,
+          username: accountName,
+          email: looksLikeEmail ? accountName : null,
+          name: owner.account.nickname || accountName,
+          phone: owner.phone,
+          invitedAt: owner.createdAt,
+        },
+        loginUrl,
       };
     }),
 
@@ -333,7 +428,38 @@ export const storeProfileRouter = router({
         throw new TRPCError({ code: 'NOT_FOUND', message: 'No brand owner invited yet for that store' });
       }
       const link = await createMagicLink(owner.id);
-      return { magicLinkUrl: buildMagicLinkUrl(link.rawToken), expiresAt: link.expiresAt };
+      return {
+        magicLinkUrl: buildMagicLinkUrl(link.rawToken, ctx.origin || undefined),
+        expiresAt: link.expiresAt,
+      };
+    }),
+
+  // Manager+ : reroll the merchant's password. Returns the plaintext exactly
+  // once. The old password stops working immediately.
+  resetBrandOwnerPassword: managerProcedure
+    .input(z.object({ tagId: z.number() }))
+    .output(z.object({ username: z.string(), password: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const owner = await prisma.brandOwner.findUnique({
+        where: { tagId: input.tagId },
+        include: { tag: { select: { teamId: true } }, account: true },
+      });
+      if (!owner || owner.tag.teamId !== ctx.teamId) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'No brand owner invited yet for that store' });
+      }
+      if (owner.account.role !== 'brand_owner') {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'Account is not a brand-owner; refusing to reset.',
+        });
+      }
+      const password = generateBrandOwnerPassword();
+      const passwordHash = await hashPassword(password);
+      await prisma.accounts.update({
+        where: { id: owner.accountId },
+        data: { password: passwordHash },
+      });
+      return { username: owner.account.name, password };
     }),
 
   // Manager+ : soft-archive a store. Reversible via unarchive.

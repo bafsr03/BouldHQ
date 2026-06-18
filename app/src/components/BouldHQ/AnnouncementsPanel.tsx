@@ -191,6 +191,7 @@ function Composer({
   const [body, setBody] = useState('');
   const [scope, setScope] = useState<'team' | 'global'>(role === 'founder' ? 'global' : 'team');
   const [pinned, setPinned] = useState(false);
+  const [ownersOnly, setOwnersOnly] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -201,7 +202,7 @@ function Composer({
     try {
       await api.announcement.create.mutate({
         teamId: scope === 'global' ? null : teamId,
-        category, title: title.trim(), body: body.trim(), pinned,
+        category, title: title.trim(), body: body.trim(), pinned, ownersOnly,
       });
       setTitle(''); setBody(''); setPinned(false);
       await onPosted();
@@ -263,6 +264,15 @@ function Composer({
             <Switch size="sm" isSelected={pinned} onValueChange={setPinned} />
             Pin to top
           </label>
+          {role === 'founder' && (
+            <label className="flex items-center gap-2 text-xs text-default-700">
+              <Switch size="sm" isSelected={ownersOnly} onValueChange={setOwnersOnly} />
+              <span>
+                Store owners only
+                <span className="text-default-400 ml-1">(hidden from staff feed)</span>
+              </span>
+            </label>
+          )}
           {error && <div className="rounded-md bg-danger/10 border border-danger/30 text-danger text-xs px-3 py-2">{error}</div>}
         </ModalBody>
         <ModalFooter>

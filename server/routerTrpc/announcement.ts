@@ -18,6 +18,7 @@ const announcementSchema = z.object({
   title: z.string(),
   body: z.string(),
   pinned: z.boolean(),
+  ownersOnly: z.boolean(),
   createdAt: z.date(),
   updatedAt: z.date(),
   author: z.object({
@@ -46,6 +47,7 @@ export const announcementRouter = router({
 
       const rows = await prisma.announcement.findMany({
         where: {
+          ownersOnly: false,   // owner-only posts are hidden from the staff /hq feed
           ...(input.category && { category: input.category }),
           OR: [
             { teamId: null },
@@ -71,6 +73,7 @@ export const announcementRouter = router({
       title: z.string().min(1).max(255),
       body: z.string().min(1),
       pinned: z.boolean().default(false),
+      ownersOnly: z.boolean().default(false),  // true = only brand owners see this
     }))
     .output(announcementSchema)
     .mutation(async ({ input, ctx }) => {
@@ -94,6 +97,7 @@ export const announcementRouter = router({
           title: input.title,
           body: input.body,
           pinned: input.pinned,
+          ownersOnly: input.ownersOnly,
         },
         include: {
           author: { select: { id: true, name: true, nickname: true, image: true } },

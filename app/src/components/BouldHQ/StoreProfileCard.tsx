@@ -158,7 +158,7 @@ export const StoreProfileCard = observer(({ tagId, tagName }: { tagId: number; t
           )}
         </div>
 
-        <div className="flex flex-col items-start gap-1 flex-shrink-0">
+        <div className="flex flex-col items-start gap-1 flex-shrink-0 min-w-[120px]">
           <span className="text-xs text-default-500">{t('store-profile-collab-access')}</span>
           <div className="flex items-center gap-2">
             <Switch
@@ -166,8 +166,8 @@ export const StoreProfileCard = observer(({ tagId, tagName }: { tagId: number; t
               isSelected={profile.collabAccess}
               onValueChange={(v) => persist({ collabAccess: v })}
             />
-            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${profile.collabAccess ? 'bg-success-100 text-success-700' : 'bg-danger-100 text-danger-700'}`}>
-              {profile.collabAccess ? `✓ ${t('store-profile-collab-access')}` : `✗ ${t('store-profile-no-access')}`}
+            <span className={`text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${profile.collabAccess ? 'bg-success-100 text-success-700' : 'bg-danger-100 text-danger-700'}`}>
+              {profile.collabAccess ? '✓ On' : '✗ Off'}
             </span>
           </div>
         </div>

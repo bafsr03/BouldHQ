@@ -9,6 +9,7 @@ import sharp from 'sharp';
 import { prisma } from '../../prisma';
 import { getTokenFromRequest } from '../../lib/helper';
 import { FileService } from '../../lib/files';
+import { hasNoteAccessByTeamOrBrand } from '../../lib/fileAccess';
 
 const router = express.Router();
 const STREAM_THRESHOLD = 5 * 1024 * 1024;
@@ -129,14 +130,13 @@ router.get(/.*/, async (req, res) => {
         include: {
           note: {
             select: {
+              id: true,
               isShare: true,
               accountId: true
             }
           }
         }
       });
-      // console.log('myFile', myFile);
-
 
       if (!token) {
         if (myFile?.note?.isShare) {
@@ -145,8 +145,14 @@ router.get(/.*/, async (req, res) => {
         }
       }
 
-      if (myFile && (!myFile?.note?.isShare && Number(token?.id) != myFile?.note?.accountId && !myFile?.accountId)) {
-        return res.status(401).json({ error: "Unauthorized" });
+      if (myFile && !myFile?.note?.isShare && Number(token?.id) != myFile?.note?.accountId && !myFile?.accountId) {
+        // Per-account check failed — try team/brand scoping before denying.
+        const ok = myFile.note
+          ? await hasNoteAccessByTeamOrBrand(myFile.note.id, Number(token?.id), token?.role)
+          : false;
+        if (!ok) {
+          return res.status(401).json({ error: "Unauthorized" });
+        }
       }
     } catch (error) {
       console.error('Error checking file permissions:', error);
@@ -219,10 +225,13 @@ router.get(/.*/, async (req, res) => {
     const encodedFilename = encodeURIComponent(fullPath).replace(/['()]/g, (char) => '%' + char.charCodeAt(0).toString(16));
     const fallbackFilename = `file${path.extname(fullPath)}`;
 
+    const isHtml = contentType === 'text/html' || filePath.toLowerCase().endsWith('.html');
     res.set({
       "Content-Type": contentType,
       "ETag": etag,
-      "Cache-Control": "public, max-age=3600"
+      // HTML files: revalidate every time (ETag still allows 304s) so edits show up immediately.
+      // Other assets: cache for 1h.
+      "Cache-Control": isHtml ? "no-cache" : "public, max-age=3600"
     });
 
     if (isDownload) {
