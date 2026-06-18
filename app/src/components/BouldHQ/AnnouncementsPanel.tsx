@@ -23,37 +23,60 @@ type Announcement = {
 
 type Role = 'founder' | 'manager' | 'salesman' | null;
 
-const CATEGORIES: { value: Category; label: string; icon: string }[] = [
-  { value: 'announcement',    label: 'Announcement',  icon: 'tabler:speakerphone' },
-  { value: 'workflow_update', label: 'Workflow update', icon: 'tabler:git-branch' },
-  { value: 'changelog',       label: 'Changelog',       icon: 'tabler:tag' },
+// Scope the user picks in the composer.
+// Maps to → { teamId, ownersOnly } on the server.
+export type PostScope = 'team' | 'owners' | 'global';
+
+export const SCOPE_OPTIONS: { value: PostScope; label: string; hint: string; icon: string }[] = [
+  {
+    value: 'team',
+    label: 'My team',
+    hint: 'Visible to founders, managers & salesmen on your team',
+    icon: 'tabler:users',
+  },
+  {
+    value: 'owners',
+    label: 'Store owners only',
+    hint: 'Visible in brand-owner Feed, hidden from staff',
+    icon: 'tabler:building-store',
+  },
+  {
+    value: 'global',
+    label: 'Global — all teams',
+    hint: 'Broadcast to every team and every store owner',
+    icon: 'tabler:world',
+  },
+];
+
+export const CATEGORIES: { value: Category; label: string; icon: string }[] = [
+  { value: 'announcement',    label: 'Announcement',    icon: 'tabler:speakerphone' },
+  { value: 'workflow_update', label: 'Workflow update',  icon: 'tabler:git-branch'  },
+  { value: 'changelog',       label: 'Changelog',        icon: 'tabler:tag'         },
 ];
 
 const fmt = (d: Date | string) => {
   const date = typeof d === 'string' ? new Date(d) : d;
   const today = new Date();
-  const sameDay = date.toDateString() === today.toDateString();
-  return sameDay
+  return date.toDateString() === today.toDateString()
     ? date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
     : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
 
+// ─── Panel (read-only list) ────────────────────────────────────────────────────
+// `refreshTrigger` increments from the parent each time a new post lands,
+// causing the panel to re-fetch without any other coordination.
 export function AnnouncementsPanel({
-  category, title, role, teamId, emptyHint,
+  category, title, role, teamId, emptyHint, refreshTrigger = 0,
 }: {
   category: Category | 'all';
   title: string;
   role: Role;
-  teamId: number | null;   // null until team.current loads
+  teamId: number | null;
   emptyHint: string;
+  refreshTrigger?: number;
 }) {
   const [items, setItems] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
-  const composer = useDisclosure();
-
-  // Only founders can post announcements, workflow updates, or changelog
-  // entries. Managers and salesmen are read-only on this panel.
-  const canCompose = role === 'founder';
 
   const refresh = async () => {
     try {
@@ -69,21 +92,18 @@ export function AnnouncementsPanel({
 
   useEffect(() => {
     let cancelled = false;
-    (async () => { await refresh(); if (!cancelled) setLoading(false); })();
+    setLoading(true);
+    (async () => {
+      await refresh();
+      if (!cancelled) setLoading(false);
+    })();
     return () => { cancelled = true; };
-  }, [category]);
+  }, [category, refreshTrigger]);
 
   return (
     <section aria-label={title} className="rounded-xl border border-divider bg-content1">
       <header className="flex items-center justify-between px-4 py-3 border-b border-divider">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-default-600">{title}</h2>
-        {canCompose && (
-          <Button size="sm" variant="flat" color="primary"
-            onPress={composer.onOpen}
-            startContent={<Icon icon="tabler:plus" width={14} height={14} />}>
-            Post
-          </Button>
-        )}
       </header>
 
       {loading && (
@@ -102,18 +122,11 @@ export function AnnouncementsPanel({
           <AnnouncementRow key={a.id} item={a} role={role} onChanged={refresh} />
         ))}
       </ul>
-
-      <Composer
-        disclosure={composer}
-        defaultCategory={category === 'all' ? 'announcement' : category}
-        role={role}
-        teamId={teamId}
-        onPosted={async () => { composer.onClose(); await refresh(); }}
-      />
     </section>
   );
 }
 
+// ─── Row ──────────────────────────────────────────────────────────────────────
 function AnnouncementRow({
   item, role, onChanged,
 }: { item: Announcement; role: Role; onChanged: () => void | Promise<void> }) {
@@ -130,7 +143,6 @@ function AnnouncementRow({
     catch (e) { console.error(e); } finally { setBusy(null); }
   };
 
-  // Pin / delete are founder-only operations now.
   const isFounder = role === 'founder';
   const catMeta = CATEGORIES.find((c) => c.value === item.category) ?? CATEGORIES[0];
 
@@ -158,16 +170,12 @@ function AnnouncementRow({
         </span>
         {isFounder && (
           <>
-            <button
-              type="button" onClick={togglePin} disabled={!!busy}
-              className="text-xs text-default-500 hover:text-foreground transition-colors disabled:opacity-50"
-            >
+            <button type="button" onClick={togglePin} disabled={!!busy}
+              className="text-xs text-default-500 hover:text-foreground transition-colors disabled:opacity-50">
               {busy === 'pin' ? 'pinning…' : item.pinned ? 'Unpin' : 'Pin'}
             </button>
-            <button
-              type="button" onClick={remove} disabled={!!busy}
-              className="text-xs text-danger/80 hover:text-danger transition-colors disabled:opacity-50"
-            >
+            <button type="button" onClick={remove} disabled={!!busy}
+              className="text-xs text-danger/80 hover:text-danger transition-colors disabled:opacity-50">
               {busy === 'del' ? 'deleting…' : 'Delete'}
             </button>
           </>
@@ -177,35 +185,50 @@ function AnnouncementRow({
   );
 }
 
-function Composer({
-  disclosure, defaultCategory, role, teamId, onPosted,
+// ─── Composer (used by hq.tsx, not by each panel) ─────────────────────────────
+export function AnnouncementComposer({
+  disclosure, role, teamId, onPosted,
 }: {
   disclosure: ReturnType<typeof useDisclosure>;
-  defaultCategory: Category;
   role: Role;
   teamId: number | null;
   onPosted: () => void | Promise<void>;
 }) {
-  const [category, setCategory] = useState<Category>(defaultCategory);
+  const [category, setCategory] = useState<Category>('announcement');
+  const [scope, setScope] = useState<PostScope>('team');
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
-  const [scope, setScope] = useState<'team' | 'global'>(role === 'founder' ? 'global' : 'team');
   const [pinned, setPinned] = useState(false);
-  const [ownersOnly, setOwnersOnly] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => { setCategory(defaultCategory); }, [defaultCategory]);
+  // reset on open
+  useEffect(() => {
+    if (disclosure.isOpen) {
+      setCategory('announcement');
+      setScope('team');
+      setTitle('');
+      setBody('');
+      setPinned(false);
+      setError(null);
+    }
+  }, [disclosure.isOpen]);
 
   const submit = async () => {
     setSubmitting(true); setError(null);
     try {
+      const ownersOnly = scope === 'owners';
+      const resolvedTeamId = scope === 'global' ? null : teamId;
       await api.announcement.create.mutate({
-        teamId: scope === 'global' ? null : teamId,
-        category, title: title.trim(), body: body.trim(), pinned, ownersOnly,
+        teamId: resolvedTeamId,
+        category,
+        title: title.trim(),
+        body: body.trim(),
+        pinned,
+        ownersOnly,
       });
-      setTitle(''); setBody(''); setPinned(false);
       await onPosted();
+      disclosure.onClose();
     } catch (e: any) {
       setError(e?.message ?? 'Failed to post');
     } finally { setSubmitting(false); }
@@ -214,66 +237,90 @@ function Composer({
   return (
     <Modal isOpen={disclosure.isOpen} onClose={disclosure.onClose} size="2xl">
       <ModalContent>
-        <ModalHeader>New post</ModalHeader>
-        <ModalBody className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <span className="text-xs text-default-500">Category</span>
-              <Select
-                size="sm"
-                selectedKeys={[category]}
-                onSelectionChange={(keys) => {
-                  const v = Array.from(keys)[0] as Category;
-                  if (v) setCategory(v);
-                }}
-              >
-                {CATEGORIES.map((c) => (
-                  <SelectItem key={c.value}>{c.label}</SelectItem>
-                ))}
-              </Select>
-            </label>
-            {role === 'founder' && (
-              <label className="block">
-                <span className="text-xs text-default-500">Scope</span>
-                <Select
-                  size="sm"
-                  selectedKeys={[scope]}
-                  onSelectionChange={(keys) => {
-                    const v = Array.from(keys)[0] as 'team' | 'global';
-                    if (v) setScope(v);
-                  }}
-                >
-                  <SelectItem key="global">Global (all teams)</SelectItem>
-                  <SelectItem key="team">My active team only</SelectItem>
-                </Select>
-              </label>
-            )}
-          </div>
+        <ModalHeader className="flex items-center gap-2">
+          <Icon icon="tabler:speakerphone" width={18} height={18} className="text-primary" />
+          New post
+        </ModalHeader>
+        <ModalBody className="space-y-4">
+
+          {/* Category */}
           <label className="block">
-            <span className="text-xs text-default-500">Title</span>
+            <span className="text-xs text-default-500 mb-1 block">Category</span>
+            <div className="flex gap-2 flex-wrap">
+              {CATEGORIES.map((c) => (
+                <button
+                  key={c.value}
+                  type="button"
+                  onClick={() => setCategory(c.value)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                    category === c.value
+                      ? 'bg-primary text-white border-primary'
+                      : 'bg-content2 border-divider text-default-600 hover:border-primary/40'
+                  }`}
+                >
+                  <Icon icon={c.icon} width={13} height={13} />
+                  {c.label}
+                </button>
+              ))}
+            </div>
+          </label>
+
+          {/* Scope */}
+          <label className="block">
+            <span className="text-xs text-default-500 mb-1 block">Who sees this?</span>
+            <div className="flex flex-col gap-2">
+              {SCOPE_OPTIONS.map((s) => (
+                <button
+                  key={s.value}
+                  type="button"
+                  onClick={() => setScope(s.value)}
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left transition-colors ${
+                    scope === s.value
+                      ? 'bg-primary/10 border-primary/40 text-primary'
+                      : 'bg-content2 border-divider text-default-600 hover:border-primary/20'
+                  }`}
+                >
+                  <div className={`size-7 rounded-lg flex items-center justify-center shrink-0 ${
+                    scope === s.value ? 'bg-primary text-white' : 'bg-default-200 text-default-500'
+                  }`}>
+                    <Icon icon={s.icon} width={14} height={14} />
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold">{s.label}</div>
+                    <div className={`text-[11px] ${scope === s.value ? 'text-primary/70' : 'text-default-400'}`}>{s.hint}</div>
+                  </div>
+                  {scope === s.value && (
+                    <Icon icon="tabler:check" width={14} height={14} className="ml-auto shrink-0" />
+                  )}
+                </button>
+              ))}
+            </div>
+          </label>
+
+          {/* Title */}
+          <label className="block">
+            <span className="text-xs text-default-500 mb-1 block">Title</span>
             <Input size="sm" value={title} onChange={(e) => setTitle(e.target.value)}
               placeholder="Short headline" />
           </label>
+
+          {/* Body */}
           <label className="block">
-            <span className="text-xs text-default-500">Body</span>
-            <Textarea size="sm" minRows={5} value={body}
+            <span className="text-xs text-default-500 mb-1 block">Body</span>
+            <Textarea size="sm" minRows={4} value={body}
               onChange={(e) => setBody(e.target.value)}
-              placeholder="Markdown-friendly. Keep it brief — pin if it must stick around." />
+              placeholder="Write your message…" />
           </label>
+
+          {/* Pin */}
           <label className="flex items-center gap-2 text-xs text-default-700">
             <Switch size="sm" isSelected={pinned} onValueChange={setPinned} />
             Pin to top
           </label>
-          {role === 'founder' && (
-            <label className="flex items-center gap-2 text-xs text-default-700">
-              <Switch size="sm" isSelected={ownersOnly} onValueChange={setOwnersOnly} />
-              <span>
-                Store owners only
-                <span className="text-default-400 ml-1">(hidden from staff feed)</span>
-              </span>
-            </label>
+
+          {error && (
+            <div className="rounded-md bg-danger/10 border border-danger/30 text-danger text-xs px-3 py-2">{error}</div>
           )}
-          {error && <div className="rounded-md bg-danger/10 border border-danger/30 text-danger text-xs px-3 py-2">{error}</div>}
         </ModalBody>
         <ModalFooter>
           <Button variant="light" onPress={disclosure.onClose}>Cancel</Button>

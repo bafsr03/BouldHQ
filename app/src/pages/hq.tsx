@@ -1,11 +1,11 @@
 import { observer } from 'mobx-react-lite';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, Chip, Skeleton } from '@heroui/react';
+import { Button, Chip, Skeleton, useDisclosure } from '@heroui/react';
 import { Icon } from '@/components/Common/Iconify/icons';
 import { ScrollArea } from '@/components/Common/ScrollArea';
 import { api } from '@/lib/trpc';
-import { AnnouncementsPanel } from '@/components/BouldHQ/AnnouncementsPanel';
+import { AnnouncementsPanel, AnnouncementComposer } from '@/components/BouldHQ/AnnouncementsPanel';
 import { getBlinkoEndpoint } from '@/lib/blinkoEndpoint';
 import { RootStore } from '@/store';
 import { UserStore } from '@/store/user';
@@ -26,6 +26,8 @@ const HQ = observer(() => {
   const [stats, setStats] = useState<Stat[]>([]);
   const [systemNotes, setSystemNotes] = useState<SystemNote[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const composer = useDisclosure();
 
   useEffect(() => {
     let cancelled = false;
@@ -93,6 +95,12 @@ const HQ = observer(() => {
             )}
           </div>
           <div className="flex gap-2">
+            {team?.role === 'founder' && (
+              <Button color="default" variant="flat" onPress={composer.onOpen}
+                startContent={<Icon icon="tabler:speakerphone" width={18} height={18} />}>
+                Post
+              </Button>
+            )}
             <Button as={Link} to="/stores" color="primary" variant="flat"
               startContent={<Icon icon="tabler:building-store" width={18} height={18} />}>
               Manage stores
@@ -226,7 +234,8 @@ const HQ = observer(() => {
           title="Announcements"
           role={(team?.role as any) ?? null}
           teamId={team?.id ?? null}
-          emptyHint="No team announcements yet. Founders and managers post here."
+          emptyHint="No announcements yet."
+          refreshTrigger={refreshKey}
         />
 
         <AnnouncementsPanel
@@ -235,6 +244,7 @@ const HQ = observer(() => {
           role={(team?.role as any) ?? null}
           teamId={team?.id ?? null}
           emptyHint="No workflow changes posted yet."
+          refreshTrigger={refreshKey}
         />
 
         <AnnouncementsPanel
@@ -242,10 +252,18 @@ const HQ = observer(() => {
           title="What's new in BouldHQ"
           role={(team?.role as any) ?? null}
           teamId={team?.id ?? null}
-          emptyHint="No changelog entries yet. Founders post here when shipping changes."
+          emptyHint="No changelog entries yet."
+          refreshTrigger={refreshKey}
         />
 
       </div>
+
+      <AnnouncementComposer
+        disclosure={composer}
+        role={(team?.role as any) ?? null}
+        teamId={team?.id ?? null}
+        onPosted={() => setRefreshKey((k) => k + 1)}
+      />
     </ScrollArea>
   );
 });
