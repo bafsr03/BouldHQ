@@ -13,9 +13,22 @@ import { api, streamApi } from '@/lib/trpc';
 type Turn =
   | { kind: 'user'; text: string; images?: string[] }
   | { kind: 'assistant'; text: string; toolCalls: ToolCall[] }
+  | { kind: 'permission'; requestId: string; tool: string; args: any; decided?: 'allow' | 'deny' }
   | { kind: 'error'; text: string };
 
 type ToolCall = { tool: string; args?: any };
+
+// Claude-Code-style modes. Shift+Tab cycles them; the footer shows the active
+// one with a colour. The mode is sent with each turn (server gates tools
+// accordingly): normal asks before writes, auto-accept runs freely, plan is
+// read-only.
+type AssistantMode = 'normal' | 'acceptEdits' | 'plan';
+const MODE_ORDER: AssistantMode[] = ['normal', 'acceptEdits', 'plan'];
+const MODE_META: Record<AssistantMode, { label: string; icon: string; hint: string; color: 'default' | 'warning' | 'primary'; dot: string }> = {
+  normal:      { label: 'Normal',      icon: 'tabler:player-play',         hint: 'confirms before changes',  color: 'default', dot: 'bg-default-400' },
+  acceptEdits: { label: 'Auto-accept', icon: 'tabler:player-track-next',   hint: 'runs tools without asking', color: 'warning', dot: 'bg-warning' },
+  plan:        { label: 'Plan mode',   icon: 'tabler:player-pause',        hint: 'read-only · proposes a plan', color: 'primary', dot: 'bg-primary' },
+};
 
 type PendingImage = { id: string; dataUrl: string; mimeType: string };
 
@@ -59,6 +72,26 @@ const TOOL_LABEL: Record<string, { icon: string; label: string }> = {
   'search-blinko-tool':              { icon: 'tabler:notes',          label: 'searched notes' },
 };
 
+// Pull the most human-relevant field out of a tool's args for the approval
+// card (e.g. the file name or path the assistant is about to touch).
+function permissionDetail(args: any): string {
+  if (!args || typeof args !== 'object') return '';
+  const a = args as Record<string, any>;
+  const v = a.fileName ?? a.name ?? a.path ?? a.newPath ?? a.title ?? a.storeName ?? a.content;
+  if (typeof v !== 'string') return '';
+  return v.length > 160 ? v.slice(0, 157) + '…' : v;
+}
+
+// Present-tense phrasing for the approval card (the TOOL_LABEL map is
+// past-tense, which reads wrong in a "Allow the assistant to …?" prompt).
+const WRITE_ACTION_LABEL: Record<string, string> = {
+  'bouldhq-create-resource-file':    'create a resource file',
+  'bouldhq-delete-resource':         'delete a resource',
+  'bouldhq-move-resource':           'move a resource',
+  'bouldhq-rename-resource':         'rename a resource',
+  'bouldhq-create-task-for-manager': 'open a task for the manager',
+};
+
 function formatRelative(d: string | Date): string {
   const date = typeof d === 'string' ? new Date(d) : d;
   const diff = Date.now() - date.getTime();
@@ -83,6 +116,7 @@ const AssistantPage = observer(() => {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [mode, setMode] = useState<AssistantMode>('normal');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -244,32 +278,26 @@ const AssistantPage = observer(() => {
     setInput('');
     setPendingImages([]);
 
-    // Push an empty assistant turn we mutate in place as deltas stream in.
-    setTurns((prev) => [...prev, { kind: 'assistant', text: '', toolCalls: [] }]);
-
-    // Rewrite the last (assistant) turn — used for every streamed delta/tool.
-    const updateLastAssistant = (fn: (t: Extract<Turn, { kind: 'assistant' }>) => Extract<Turn, { kind: 'assistant' }>) =>
+    // Lazily grow the assistant bubble: append to the last assistant turn, or
+    // start a new one. This keeps text that resumes AFTER an approval card
+    // landing below the card instead of jumping back up into the old bubble.
+    const appendAssistantText = (text: string) =>
       setTurns((prev) => {
         const next = [...prev];
-        for (let i = next.length - 1; i >= 0; i--) {
-          if (next[i].kind === 'assistant') {
-            next[i] = fn(next[i] as Extract<Turn, { kind: 'assistant' }>);
-            break;
-          }
-        }
+        const last = next[next.length - 1];
+        if (last && last.kind === 'assistant') next[next.length - 1] = { ...last, text: last.text + text };
+        else next.push({ kind: 'assistant', text, toolCalls: [] });
         return next;
       });
-
-    // Show an error turn, dropping a trailing empty assistant bubble if the
-    // failure happened before any text streamed in.
-    const showError = (text: string) =>
+    const addAssistantTool = (tool: string, args: any) =>
       setTurns((prev) => {
-        const trimmed =
-          prev.length && prev[prev.length - 1].kind === 'assistant' && !(prev[prev.length - 1] as any).text
-            ? prev.slice(0, -1)
-            : prev;
-        return [...trimmed, { kind: 'error', text }];
+        const next = [...prev];
+        const last = next[next.length - 1];
+        if (last && last.kind === 'assistant') next[next.length - 1] = { ...last, toolCalls: [...last.toolCalls, { tool, args }] };
+        else next.push({ kind: 'assistant', text: '', toolCalls: [{ tool, args }] });
+        return next;
       });
+    const showError = (text: string) => setTurns((prev) => [...prev, { kind: 'error', text }]);
 
     try {
       const stream = await streamApi.ai.assistantChatStream.mutate({
@@ -277,16 +305,22 @@ const AssistantPage = observer(() => {
         history,
         conversationId: conversationId ?? undefined,
         images: imagesForApi,
+        mode,
       });
 
-      let sawError = false;
+      let produced = false;
       for await (const chunk of stream) {
         if (chunk.type === 'delta') {
-          updateLastAssistant((t) => ({ ...t, text: t.text + chunk.text }));
+          produced = true;
+          appendAssistantText(chunk.text);
         } else if (chunk.type === 'tool') {
-          updateLastAssistant((t) => ({ ...t, toolCalls: [...t.toolCalls, { tool: chunk.tool, args: chunk.args }] }));
+          produced = true;
+          addAssistantTool(chunk.tool, chunk.args);
+        } else if (chunk.type === 'permission') {
+          produced = true;
+          setTurns((prev) => [...prev, { kind: 'permission', requestId: chunk.requestId, tool: chunk.tool, args: chunk.args }]);
         } else if (chunk.type === 'error') {
-          sawError = true;
+          produced = true;
           showError(chunk.error || 'Assistant error');
         } else if (chunk.type === 'done') {
           if (chunk.conversationId && chunk.conversationId !== conversationId) {
@@ -296,14 +330,29 @@ const AssistantPage = observer(() => {
         }
       }
 
-      // If the model produced nothing and there was no error, show a placeholder.
-      if (!sawError) {
-        updateLastAssistant((t) => (t.text ? t : { ...t, text: '(no response)' }));
-      }
+      if (!produced) appendAssistantText('(no response)');
     } catch (e: any) {
       showError(e?.message ?? 'Request failed');
     } finally {
       setBusy(false);
+    }
+  };
+
+  // Cycle Normal → Auto-accept → Plan → Normal (Shift+Tab, like Claude Code).
+  const cycleMode = () =>
+    setMode((m) => MODE_ORDER[(MODE_ORDER.indexOf(m) + 1) % MODE_ORDER.length]);
+
+  // Answer a Normal-mode approval prompt; unblocks the parked server stream.
+  const respondPermission = async (requestId: string, allow: boolean) => {
+    setTurns((prev) =>
+      prev.map((t) =>
+        t.kind === 'permission' && t.requestId === requestId ? { ...t, decided: allow ? 'allow' : 'deny' } : t,
+      ),
+    );
+    try {
+      await api.ai.respondToToolPermission.mutate({ requestId, allow });
+    } catch {
+      /* stream will time out and deny server-side if this fails */
     }
   };
 
@@ -519,6 +568,36 @@ const AssistantPage = observer(() => {
                 </article>
               );
             }
+            if (t.kind === 'permission') {
+              const action = WRITE_ACTION_LABEL[t.tool] ?? (TOOL_LABEL[t.tool]?.label ?? t.tool);
+              const detail = permissionDetail(t.args);
+              const decided = t.decided;
+              return (
+                <article key={i} className="rounded-xl border border-warning/40 bg-warning/5 px-4 py-3 max-w-[85%] space-y-2">
+                  <div className="flex items-center gap-2 text-sm">
+                    <Icon icon="tabler:shield-question" width={16} height={16} className="text-warning" />
+                    <span className="font-medium">Allow the assistant to {action}?</span>
+                  </div>
+                  {detail && <div className="text-xs text-default-500 break-words pl-6">{detail}</div>}
+                  {decided ? (
+                    <div className={`text-xs pl-6 font-medium ${decided === 'allow' ? 'text-success' : 'text-danger'}`}>
+                      {decided === 'allow' ? '✓ Allowed' : '✕ Denied'}
+                    </div>
+                  ) : (
+                    <div className="flex gap-2 pl-6">
+                      <Button size="sm" color="primary" onPress={() => respondPermission(t.requestId, true)}>
+                        Allow
+                      </Button>
+                      <Button size="sm" variant="flat" onPress={() => respondPermission(t.requestId, false)}>
+                        Deny
+                      </Button>
+                    </div>
+                  )}
+                </article>
+              );
+            }
+            // assistant turn
+            if (t.toolCalls.length === 0 && !t.text) return null;
             return (
               <article key={i} className="space-y-2">
                 {t.toolCalls.length > 0 && (
@@ -539,9 +618,11 @@ const AssistantPage = observer(() => {
                     })}
                   </div>
                 )}
-                <div className="rounded-2xl rounded-bl-md bg-content1 border border-divider px-4 py-2 text-sm max-w-[85%] whitespace-pre-wrap break-words">
-                  {t.text}
-                </div>
+                {t.text && (
+                  <div className="rounded-2xl rounded-bl-md bg-content1 border border-divider px-4 py-2 text-sm max-w-[85%] whitespace-pre-wrap break-words">
+                    {t.text}
+                  </div>
+                )}
               </article>
             );
           })}
@@ -616,6 +697,28 @@ const AssistantPage = observer(() => {
           </div>
         )}
 
+        <div className="max-w-3xl mx-auto mb-2 flex items-center gap-2">
+          <Tooltip content="Shift+Tab to cycle modes" placement="top">
+            <button
+              type="button"
+              onClick={cycleMode}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                mode === 'normal'      ? 'border-default-300 text-default-600 hover:bg-default-100'
+                : mode === 'acceptEdits' ? 'border-warning/50 text-warning hover:bg-warning/10'
+                :                          'border-primary/50 text-primary hover:bg-primary/10'
+              }`}
+              aria-label={`Mode: ${MODE_META[mode].label}. Shift+Tab to change.`}
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${MODE_META[mode].dot}`} />
+              <Icon icon={MODE_META[mode].icon} width={13} height={13} />
+              {MODE_META[mode].label}
+            </button>
+          </Tooltip>
+          <span className="text-[11px] text-default-400">
+            {MODE_META[mode].hint} · <kbd className="font-mono">Shift+Tab</kbd> to switch
+          </span>
+        </div>
+
         <div className="max-w-3xl mx-auto flex items-end gap-2">
           <Tooltip content="Attach image (or paste / drag-and-drop)" placement="top">
             <Button
@@ -641,6 +744,10 @@ const AssistantPage = observer(() => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 send();
+              } else if (e.key === 'Tab' && e.shiftKey) {
+                // Shift+Tab cycles modes, just like Claude Code in the terminal.
+                e.preventDefault();
+                cycleMode();
               }
             }}
             classNames={{ inputWrapper: 'min-h-[40px]' }}

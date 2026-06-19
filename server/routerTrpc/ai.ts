@@ -16,6 +16,48 @@ import { inferModelCapabilities } from '@shared/lib/modelTemplates';
 import { isClaudeCodeConfigured } from '@server/aiServer/claudeCodeAgent';
 import { expandSlashCommand } from '@server/aiServer/slashCommands';
 
+// ---- Assistant modes (mirror Claude Code's terminal modes) ----------------
+// normal      → confirm before each write/destructive tool (Allow/Deny prompt)
+// acceptEdits → run every tool without asking (current default behaviour)
+// plan        → read-only: write tools are denied so the agent proposes a plan
+const ASSISTANT_MODES = ['normal', 'acceptEdits', 'plan'] as const;
+type AssistantMode = (typeof ASSISTANT_MODES)[number];
+
+// Tools that change state — these are what Normal mode prompts on and Plan
+// mode blocks. Everything else (find/list/search) is read-only and runs freely.
+const WRITE_TOOL_IDS = new Set<string>([
+  'bouldhq-create-task-for-manager',
+  'bouldhq-create-resource-file',
+  'bouldhq-delete-resource',
+  'bouldhq-move-resource',
+  'bouldhq-rename-resource',
+]);
+
+// In-flight Normal-mode approval prompts, keyed by requestId. The streaming
+// generator parks on the promise; the respondToToolPermission mutation
+// resolves it when the user clicks Allow/Deny. Single server process (the
+// owner's Mac / one container), so an in-memory map is sufficient.
+const pendingToolPermissions = new Map<string, (d: { allow: boolean; message?: string }) => void>();
+
+// Minimal push/close async queue so the generator can interleave model output
+// (text/tool chunks) with approval prompts raised from inside a tool call.
+function createEventQueue<T>() {
+  const buffer: T[] = [];
+  let wake: (() => void) | null = null;
+  let closed = false;
+  return {
+    push(item: T) { buffer.push(item); wake?.(); wake = null; },
+    close() { closed = true; wake?.(); wake = null; },
+    async *drain(): AsyncGenerator<T> {
+      while (true) {
+        if (buffer.length) { yield buffer.shift() as T; continue; }
+        if (closed) return;
+        await new Promise<void>((r) => { wake = r; });
+      }
+    },
+  };
+}
+
 export const aiRouter = router({
   // Reports whether the owner has wired up the Claude Code subscription.
   // Surfaced on the /ai page so the founder gets a clear error state when
@@ -241,6 +283,8 @@ export const aiRouter = router({
         dataUrl: z.string(),
         mimeType: z.string().optional(),
       })).default([]),
+      // Claude-Code-style mode for this turn (see ASSISTANT_MODES).
+      mode: z.enum(ASSISTANT_MODES).default('acceptEdits'),
     }))
     .mutation(async function* ({ input, ctx }) {
       try {
@@ -297,27 +341,87 @@ export const aiRouter = router({
             }
           : { role: 'user' as const, content: effectiveMessage };
 
+        const mode = input.mode as AssistantMode;
+
+        // Tell the model what mode it's in so it behaves proactively (esp.
+        // Plan mode → propose instead of attempting and getting denied).
+        const modePreamble =
+          mode === 'plan'
+            ? 'You are in PLAN MODE. Do not create, edit, move, rename, or delete any resource, and do not open tasks. Use only read-only tools to research, then describe the plan you would carry out and stop.'
+            : mode === 'normal'
+              ? 'Before any action that creates, edits, moves, renames, or deletes a resource — or opens a task — the user is asked to approve it. Proceed normally; if an action is declined, adapt to their guidance.'
+              : '';
+
         const messages = [
+          ...(modePreamble ? [{ role: 'system' as const, content: modePreamble }] : []),
           ...input.history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
           currentTurn,
         ];
         const runtimeContext = new RuntimeContext();
         runtimeContext.set('accountId', accountId);
-
         const toolCalls: { tool: string; args: any }[] = [];
-        const { fullStream, text: textPromise } = await agent.stream(messages as any, { runtimeContext });
 
-        for await (const chunk of fullStream as AsyncIterable<any>) {
-          if (chunk.type === 'text-delta') {
-            yield { type: 'delta' as const, text: chunk.textDelta as string };
-          } else if (chunk.type === 'tool-call') {
-            const tc = { tool: chunk.toolName as string, args: chunk.args };
-            toolCalls.push(tc);
-            yield { type: 'tool' as const, tool: tc.tool, args: tc.args };
-          } else if (chunk.type === 'error') {
-            yield { type: 'error' as const, error: String(chunk.error ?? 'Assistant error') };
+        // Single queue carries BOTH the model's streamed output and any
+        // approval prompts raised from inside a tool call, so they interleave
+        // in the right order on the client.
+        const queue = createEventQueue<any>();
+
+        // Per-mode approval gate. Read tools always run. Write tools: allowed
+        // in acceptEdits, denied in plan, prompted in normal.
+        const gateToolCall = async (toolId: string, args: any) => {
+          if (!WRITE_TOOL_IDS.has(toolId)) return { allow: true };
+          if (mode === 'acceptEdits') return { allow: true };
+          if (mode === 'plan') {
+            return {
+              allow: false,
+              message: 'Plan mode is on — do not make any changes. Describe what you would do instead, then stop.',
+            };
           }
+          // normal mode → ask the user and park until they answer.
+          const requestId = `${conversationId}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+          const decision = new Promise<{ allow: boolean; message?: string }>((resolve) => {
+            pendingToolPermissions.set(requestId, resolve);
+          });
+          const timeout = new Promise<{ allow: boolean; message?: string }>((resolve) => {
+            setTimeout(() => resolve({ allow: false, message: 'No response — action declined.' }), 10 * 60 * 1000);
+          });
+          queue.push({ type: 'permission', requestId, tool: toolId, args });
+          const answer = await Promise.race([decision, timeout]);
+          pendingToolPermissions.delete(requestId);
+          return answer;
+        };
+
+        const { fullStream, text: textPromise } = await agent.stream(messages as any, {
+          runtimeContext,
+          gateToolCall,
+        });
+
+        // Pump model output into the queue in the background; the gate pushes
+        // approval prompts into the same queue while a tool call is parked.
+        const pump = (async () => {
+          try {
+            for await (const chunk of fullStream as AsyncIterable<any>) {
+              if (chunk.type === 'text-delta') {
+                queue.push({ type: 'delta', text: chunk.textDelta as string });
+              } else if (chunk.type === 'tool-call') {
+                const tc = { tool: chunk.toolName as string, args: chunk.args };
+                toolCalls.push(tc);
+                queue.push({ type: 'tool', tool: tc.tool, args: tc.args });
+              } else if (chunk.type === 'error') {
+                queue.push({ type: 'error', error: String(chunk.error ?? 'Assistant error') });
+              }
+            }
+          } catch (e: any) {
+            queue.push({ type: 'error', error: e?.message ?? 'Assistant stream failed' });
+          } finally {
+            queue.close();
+          }
+        })();
+
+        for await (const ev of queue.drain()) {
+          yield ev;
         }
+        await pump;
 
         const text = await textPromise;
 
@@ -356,6 +460,29 @@ export const aiRouter = router({
       } catch (err: any) {
         yield { type: 'error' as const, error: err?.message ?? 'Assistant call failed' };
       }
+    }),
+
+  // Answer a Normal-mode approval prompt raised by assistantChatStream. The
+  // streaming generator is parked awaiting this requestId; resolving it lets
+  // the tool run (allow) or returns a denial message to the model (deny).
+  respondToToolPermission: founderProcedure
+    .input(z.object({
+      requestId: z.string(),
+      allow: z.boolean(),
+      message: z.string().optional(),
+    }))
+    .mutation(async ({ input }) => {
+      const resolve = pendingToolPermissions.get(input.requestId);
+      if (!resolve) {
+        // Already answered, timed out, or server restarted mid-stream.
+        return { ok: false, reason: 'expired' as const };
+      }
+      pendingToolPermissions.delete(input.requestId);
+      resolve({
+        allow: input.allow,
+        message: input.message ?? (input.allow ? undefined : 'The user declined this action.'),
+      });
+      return { ok: true as const };
     }),
 
   // List the caller's assistant conversations, newest first. Filters by

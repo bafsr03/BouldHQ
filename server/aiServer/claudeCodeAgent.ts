@@ -29,6 +29,12 @@ type RuntimeContextLike = {
   set?: (key: string, value: any) => void;
 };
 
+// Called right before a tool executes. Return { allow:false, message } to
+// block the call (the model receives the message as the tool result instead
+// of running it). Used to implement per-mode approval (Normal asks the user,
+// Plan denies writes, Auto-accept allows everything).
+export type ToolGate = (toolId: string, args: any) => Promise<{ allow: boolean; message?: string }>;
+
 export function isClaudeCodeConfigured(): boolean {
   return !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
 }
@@ -130,7 +136,7 @@ async function* buildImageStream(messages: ClaudeCodeMessage[]): AsyncIterable<a
   }
 }
 
-function wrapMastraTool(mastraTool: MastraToolLike, runtimeValues: Record<string, any>) {
+function wrapMastraTool(mastraTool: MastraToolLike, runtimeValues: Record<string, any>, gate?: ToolGate) {
   const name = sanitizeToolName(mastraTool.id);
   const shape = mastraTool.inputSchema?.shape ?? {};
   const sdkTool = tool(
@@ -138,6 +144,17 @@ function wrapMastraTool(mastraTool: MastraToolLike, runtimeValues: Record<string
     mastraTool.description || mastraTool.id,
     shape,
     async (args: any) => {
+      // Approval gate runs first. If denied, the tool never executes — the
+      // model gets the denial message back as the result and can adapt.
+      if (gate) {
+        const decision = await gate(mastraTool.id, args);
+        if (!decision.allow) {
+          return {
+            content: [{ type: 'text', text: decision.message || 'The user declined this action.' }],
+            isError: true,
+          };
+        }
+      }
       const runtimeContext: RuntimeContextLike = {
         get: (k) => runtimeValues[k],
         set: (k, v) => {
@@ -177,11 +194,11 @@ export type AgentLike = {
   name: string;
   generate(
     input: string | ClaudeCodeMessage[],
-    opts?: { runtimeContext?: any; temperature?: number },
+    opts?: { runtimeContext?: any; temperature?: number; gateToolCall?: ToolGate },
   ): Promise<{ text: string; toolCalls: any[]; toolResults: any[] }>;
   stream(
     input: string | ClaudeCodeMessage[],
-    opts?: { runtimeContext?: any; temperature?: number },
+    opts?: { runtimeContext?: any; temperature?: number; gateToolCall?: ToolGate },
   ): Promise<{ fullStream: AsyncIterable<any>; text: Promise<string> }>;
 };
 
@@ -194,8 +211,8 @@ export function createClaudeCodeAgent(opts: {
   const { name, instructions, tools = {} } = opts;
   const toolList = Object.values(tools);
 
-  function buildQueryOptions(runtimeValues: Record<string, any>) {
-    const wrapped = toolList.map((t) => wrapMastraTool(t, runtimeValues));
+  function buildQueryOptions(runtimeValues: Record<string, any>, gate?: ToolGate) {
+    const wrapped = toolList.map((t) => wrapMastraTool(t, runtimeValues, gate));
     // Use the SDK's createSdkMcpServer helper — it returns a real in-process
     // MCP server instance, which is what the SDK expects in mcpServers. A
     // plain { type: 'sdk', tools } object is registered but the tools are
@@ -238,7 +255,7 @@ export function createClaudeCodeAgent(opts: {
 
       const messages = normalizeInput(input);
       const runtimeValues = pullRuntimeValues(opts);
-      const qOpts = buildQueryOptions(runtimeValues);
+      const qOpts = buildQueryOptions(runtimeValues, opts?.gateToolCall);
 
       const hasImages = hasImageContent(messages);
       const prompt: any = hasImages
@@ -300,7 +317,7 @@ export function createClaudeCodeAgent(opts: {
 
       const messages = normalizeInput(input);
       const runtimeValues = pullRuntimeValues(opts);
-      const qOpts = buildQueryOptions(runtimeValues);
+      const qOpts = buildQueryOptions(runtimeValues, opts?.gateToolCall);
 
       const hasImages = hasImageContent(messages);
       const prompt: any = hasImages
