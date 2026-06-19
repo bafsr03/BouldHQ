@@ -223,6 +223,141 @@ export const aiRouter = router({
       }
     }),
 
+  // Streaming twin of assistantChat. Same inputs / same persistence, but the
+  // reply is streamed to the client token-by-token (like Claude.ai) instead
+  // of returned in one blocking response. This is what the /ai page uses — it
+  // keeps long generations (e.g. a report per store) from tripping the
+  // client's request timeout, which surfaced as "Load failed". The generator
+  // yields tagged chunks: { type: 'delta' | 'tool' | 'error' | 'done' }.
+  assistantChatStream: founderProcedure
+    .input(z.object({
+      message: z.string().min(1),
+      history: z.array(z.object({
+        role: z.enum(['user', 'assistant']),
+        content: z.string(),
+      })).default([]),
+      conversationId: z.number().optional(),
+      images: z.array(z.object({
+        dataUrl: z.string(),
+        mimeType: z.string().optional(),
+      })).default([]),
+    }))
+    .mutation(async function* ({ input, ctx }) {
+      try {
+        const accountId = Number(ctx.id);
+        const agent = await AiModelFactory.BouldHqAssistantAgent();
+
+        // Expand slash commands (e.g. /report joon). The ORIGINAL user message
+        // is what we persist to history.
+        const headers = (ctx as any)?.req?.headers ?? {};
+        const proto = headers['x-forwarded-proto'] || 'https';
+        const host = headers['x-forwarded-host'] || headers.host || 'hq.bouldhq.com';
+        const baseUrl = `${proto}://${host}`;
+        const effectiveMessage = await expandSlashCommand(input.message, {
+          accountId,
+          baseUrl,
+        });
+
+        // Resolve or create the conversation row first.
+        let conversationId = input.conversationId;
+        let isNewConversation = false;
+        if (conversationId) {
+          const existing = await prisma.conversation.findUnique({
+            where: { id: conversationId },
+            select: { accountId: true },
+          });
+          if (!existing || existing.accountId !== accountId) {
+            yield { type: 'error' as const, error: 'Conversation not found' };
+            return;
+          }
+        } else {
+          const title = input.message.length > 60
+            ? input.message.slice(0, 57) + '…'
+            : input.message;
+          const created = await prisma.conversation.create({
+            data: { title, accountId },
+            select: { id: true },
+          });
+          conversationId = created.id;
+          isNewConversation = true;
+        }
+
+        // Build the conversation (image blocks + text when images present).
+        const currentTurn = input.images.length > 0
+          ? {
+              role: 'user' as const,
+              content: [
+                ...input.images.map((img) => ({
+                  type: 'image' as const,
+                  image: img.dataUrl,
+                  mimeType: img.mimeType,
+                })),
+                { type: 'text' as const, text: effectiveMessage },
+              ],
+            }
+          : { role: 'user' as const, content: effectiveMessage };
+
+        const messages = [
+          ...input.history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+          currentTurn,
+        ];
+        const runtimeContext = new RuntimeContext();
+        runtimeContext.set('accountId', accountId);
+
+        const toolCalls: { tool: string; args: any }[] = [];
+        const { fullStream, text: textPromise } = await agent.stream(messages as any, { runtimeContext });
+
+        for await (const chunk of fullStream as AsyncIterable<any>) {
+          if (chunk.type === 'text-delta') {
+            yield { type: 'delta' as const, text: chunk.textDelta as string };
+          } else if (chunk.type === 'tool-call') {
+            const tc = { tool: chunk.toolName as string, args: chunk.args };
+            toolCalls.push(tc);
+            yield { type: 'tool' as const, tool: tc.tool, args: tc.args };
+          } else if (chunk.type === 'error') {
+            yield { type: 'error' as const, error: String(chunk.error ?? 'Assistant error') };
+          }
+        }
+
+        const text = await textPromise;
+
+        // Persist both turns (original user message pre-expansion, like
+        // assistantChat). Images are intentionally not persisted.
+        await prisma.message.create({
+          data: {
+            conversationId,
+            role: 'user',
+            content: input.message,
+            metadata: {
+              kind: 'assistant',
+              ...(input.images.length > 0 ? { imageCount: input.images.length } : {}),
+            },
+          },
+        });
+        await prisma.message.create({
+          data: {
+            conversationId,
+            role: 'assistant',
+            content: text ?? '',
+            metadata: { kind: 'assistant', toolCalls },
+          },
+        });
+        await prisma.conversation.update({
+          where: { id: conversationId },
+          data: { updatedAt: new Date() },
+        });
+
+        yield {
+          type: 'done' as const,
+          conversationId,
+          isNewConversation,
+          toolCalls,
+        };
+      } catch (err: any) {
+        yield { type: 'error' as const, error: err?.message ?? 'Assistant call failed' };
+      }
+    }),
+
   // List the caller's assistant conversations, newest first. Filters by
   // message metadata so we don't surface unrelated Blinko-side conversations.
   // Founder-only.

@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { Button, Chip, Popover, PopoverContent, PopoverTrigger, Textarea, Tooltip } from '@heroui/react';
 import { Icon } from '@/components/Common/Iconify/icons';
 import { ScrollArea } from '@/components/Common/ScrollArea';
-import { api } from '@/lib/trpc';
+import { api, streamApi } from '@/lib/trpc';
 
 // /ai — BouldHQ assistant. Persists conversations via api.ai.assistantChat
 // (kind='assistant' in message metadata). Recent-chats popover lets the user
@@ -228,9 +228,9 @@ const AssistantPage = observer(() => {
     }
     setBusy(true);
 
-    const history = turns.flatMap((t) => {
-      if (t.kind === 'user')      return [{ role: 'user' as const, content: t.text }];
-      if (t.kind === 'assistant') return [{ role: 'assistant' as const, content: t.text }];
+    const history = turns.flatMap((t): { role: 'user' | 'assistant'; content: string }[] => {
+      if (t.kind === 'user')      return [{ role: 'user', content: t.text }];
+      if (t.kind === 'assistant') return [{ role: 'assistant', content: t.text }];
       return [];
     });
 
@@ -244,24 +244,64 @@ const AssistantPage = observer(() => {
     setInput('');
     setPendingImages([]);
 
+    // Push an empty assistant turn we mutate in place as deltas stream in.
+    setTurns((prev) => [...prev, { kind: 'assistant', text: '', toolCalls: [] }]);
+
+    // Rewrite the last (assistant) turn — used for every streamed delta/tool.
+    const updateLastAssistant = (fn: (t: Extract<Turn, { kind: 'assistant' }>) => Extract<Turn, { kind: 'assistant' }>) =>
+      setTurns((prev) => {
+        const next = [...prev];
+        for (let i = next.length - 1; i >= 0; i--) {
+          if (next[i].kind === 'assistant') {
+            next[i] = fn(next[i] as Extract<Turn, { kind: 'assistant' }>);
+            break;
+          }
+        }
+        return next;
+      });
+
+    // Show an error turn, dropping a trailing empty assistant bubble if the
+    // failure happened before any text streamed in.
+    const showError = (text: string) =>
+      setTurns((prev) => {
+        const trimmed =
+          prev.length && prev[prev.length - 1].kind === 'assistant' && !(prev[prev.length - 1] as any).text
+            ? prev.slice(0, -1)
+            : prev;
+        return [...trimmed, { kind: 'error', text }];
+      });
+
     try {
-      const res = await api.ai.assistantChat.mutate({
+      const stream = await streamApi.ai.assistantChatStream.mutate({
         message: msg || 'Please review the attached image(s) and tell me what you see.',
         history,
         conversationId: conversationId ?? undefined,
         images: imagesForApi,
       });
-      setTurns((prev) => [...prev, {
-        kind: 'assistant',
-        text: res.text || '(no response)',
-        toolCalls: res.toolCalls ?? [],
-      }]);
-      if (res.conversationId && res.conversationId !== conversationId) {
-        setConversationId(res.conversationId);
+
+      let sawError = false;
+      for await (const chunk of stream) {
+        if (chunk.type === 'delta') {
+          updateLastAssistant((t) => ({ ...t, text: t.text + chunk.text }));
+        } else if (chunk.type === 'tool') {
+          updateLastAssistant((t) => ({ ...t, toolCalls: [...t.toolCalls, { tool: chunk.tool, args: chunk.args }] }));
+        } else if (chunk.type === 'error') {
+          sawError = true;
+          showError(chunk.error || 'Assistant error');
+        } else if (chunk.type === 'done') {
+          if (chunk.conversationId && chunk.conversationId !== conversationId) {
+            setConversationId(chunk.conversationId);
+          }
+          refreshHistory();
+        }
       }
-      refreshHistory();
+
+      // If the model produced nothing and there was no error, show a placeholder.
+      if (!sawError) {
+        updateLastAssistant((t) => (t.text ? t : { ...t, text: '(no response)' }));
+      }
     } catch (e: any) {
-      setTurns((prev) => [...prev, { kind: 'error', text: e?.message ?? 'Request failed' }]);
+      showError(e?.message ?? 'Request failed');
     } finally {
       setBusy(false);
     }

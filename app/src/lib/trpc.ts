@@ -24,11 +24,14 @@ const getLinks = (useStream = false) => {
         url: getBlinkoEndpoint('/api/trpc'),
         transformer: superjson,
         headers,
-        // Increase timeout for large file uploads (5 minutes)
+        // Streaming link: long-running AI chat + large imports stream over
+        // this. AbortSignal.timeout is an ABSOLUTE wall-clock limit, so it
+        // would kill a long stream mid-flight — keep it generous (30 min) so
+        // multi-store report generations finish instead of showing "Load failed".
         fetch(url, options) {
           return fetch(url, {
             ...options,
-            signal: AbortSignal.timeout(5 * 60 * 1000) // 5 minutes
+            signal: AbortSignal.timeout(30 * 60 * 1000) // 30 minutes
           });
         }
       });
