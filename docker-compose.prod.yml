@@ -1,64 +1,74 @@
-networks:
-  blinko-network:
-    driver: host
-
 services:
   blinko-website:
-    build:
-      context: .
-      dockerfile: ./dockerfile
-    # container_name: blinko-website
+    # Pulls the image CI builds & pushes to GHCR on every push to main.
+    # Make sure the GHCR package is public, or run `docker login ghcr.io`
+    # on the VPS once with a PAT that has read:packages.
+    image: ghcr.io/bafsr03/bouldhq:latest
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       NODE_ENV: production
-      # NEXTAUTH_URL: http://localhost:1111
-      # NEXT_PUBLIC_BASE_URL: http://localhost:1111
+      NEXTAUTH_URL: https://hq.bouldhq.com
       NEXTAUTH_SECRET: my_ultra_secure_nextauth_secret
-      DATABASE_URL: postgresql://postgres:mysecretpassword@192.168.31.69:5435/postgres
-      # Owner's Claude Code OAuth token — read from host env / .env.
-      # Generate with `claude setup-token` then export it before docker compose.
+      # Talks to the postgres service below over the compose network.
+      DATABASE_URL: postgresql://postgres:mysecretpassword@postgres:5432/postgres
+      # Behind Caddy → trust the proxy so real client IPs are honoured.
+      TRUST_PROXY: "1"
+      # Owner's Claude Code OAuth token — read from host env / .env on the VPS.
+      # Generate with `claude setup-token` then export it (or put it in .env).
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN}
-    # depends_on:
-    #   postgres:
-    #     condition: service_healthy
-    # Make sure you have enough permissions.
-    # volumes:
-      # - ~/your-name/.blinko:/app/.blinko 
-    restart: always
     logging:
       options:
         max-size: "10m"
         max-file: "3"
-    ports:
-      - 1111:1111
+    # No public port — Caddy reaches it internally on the compose network.
+    expose:
+      - "1111"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://blinko-website:1111/"]
-      interval: 30s 
-      timeout: 10s   
-      retries: 5     
-      start_period: 30s 
-    # networks:
-    #   - blinko-network
+      test: ["CMD", "curl", "-f", "http://localhost:1111/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
 
-  # postgres:
-  #   image: postgres:14
-  #   container_name: blinko-postgres
-  #   restart: always
-  #   ports:
-  #     - 5435:5432
-  #   environment:
-  #     POSTGRES_DB: postgres
-  #     POSTGRES_USER: postgres
-  #     POSTGRES_PASSWORD: mysecretpassword
-  #     TZ: Asia/Shanghai
-  #   # Persisting container data
-  #   # Make sure you have enough permissions.
-  #   # volumes:
-  #     # - ~/your-name/.db:/var/lib/postgresql/data
-  #   healthcheck:
-  #     test:
-  #       ["CMD", "pg_isready", "-U", "postgres", "-d", "postgres"]
-  #     interval: 5s
-  #     timeout: 10s
-  #     retries: 5
-  #   networks:
-  #     - blinko-network
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    depends_on:
+      - blinko-website
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Persist issued certs so we don't re-request on every restart
+      # (Let's Encrypt rate-limits aggressively).
+      - caddy_data:/data
+      - caddy_config:/config
+
+  postgres:
+    image: postgres:16
+    restart: always
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: mysecretpassword
+    # Persist data across container restarts / image updates.
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Not exposed publicly — only the app container reaches it over the
+    # compose network. Uncomment to connect a local client for migrations/dumps.
+    # ports:
+    #   - 5435:5432
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "postgres"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,19 @@
+# Caddy auto-provisions a Let's Encrypt cert for this domain and renews it.
+# Make sure hq.bouldhq.com's A record points at the VPS and ports 80 + 443
+# are open before first boot, or the ACME challenge will fail.
+hq.bouldhq.com {
+	# Proxy everything to the app container over the internal compose network.
+	reverse_proxy blinko-website:1111
+
+	# Sensible upload ceiling for report/photo/voice attachments.
+	request_body {
+		max_size 50MB
+	}
+
+	encode gzip zstd
+
+	log {
+		output stdout
+		format console
+	}
+}
