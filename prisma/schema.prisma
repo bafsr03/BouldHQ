@@ -13,38 +13,39 @@ datasource db {
 }
 
 model accounts {
-  id            Int             @id @default(autoincrement())
-  name          String          @default("") @db.VarChar
-  nickname      String          @default("") @db.VarChar
-  password      String          @default("") @db.VarChar
-  image         String          @default("") @db.VarChar
-  apiToken      String          @default("") @db.VarChar
-  description   String          @default("") @db.Text
-  note          Int             @default(0)
-  role          String          @default("") @db.VarChar
-  loginType     String          @default("") @db.VarChar
-  linkAccountId Int?
+  id                Int                 @id @default(autoincrement())
+  name              String              @default("") @db.VarChar
+  nickname          String              @default("") @db.VarChar
+  password          String              @default("") @db.VarChar
+  image             String              @default("") @db.VarChar
+  apiToken          String              @default("") @db.VarChar
+  description       String              @default("") @db.Text
+  note              Int                 @default(0)
+  role              String              @default("") @db.VarChar
+  loginType         String              @default("") @db.VarChar
+  linkAccountId     Int?
   // BouldHQ — last team this user activated. NULL until they pick one (or stays
   // NULL forever for single-team users — fall back to "most recent membership").
-  lastActiveTeamId Int?
-  createdAt     DateTime        @default(now()) @db.Timestamptz(6)
-  updatedAt     DateTime        @updatedAt @db.Timestamptz(6)
-  notes         notes[]
-  configs       config[]
-  tags          tag[]
-  comments      comments[]
-  attachments   attachments[]
-  follows       follows[]
-  notifications notifications[]
-  conversations conversation[]
-  sharedNotes   noteInternalShare[]
-  aiScheduledTasks aiScheduledTask[]
-  teamMemberships  teamMember[]
-  requestsCreated  storeRequest[] @relation("RequestCreator")
-  requestsAssigned storeRequest[] @relation("RequestAssignee")
-  announcements    announcement[] @relation("AnnouncementAuthor")
-  brandOwner       brandOwner?
-  brandOwnerInvites brandOwner[] @relation("BrandOwnerInviter")
+  lastActiveTeamId  Int?
+  createdAt         DateTime            @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime            @updatedAt @db.Timestamptz(6)
+  notes             notes[]
+  configs           config[]
+  tags              tag[]
+  comments          comments[]
+  attachments       attachments[]
+  follows           follows[]
+  notifications     notifications[]
+  conversations     conversation[]
+  sharedNotes       noteInternalShare[]
+  aiScheduledTasks  aiScheduledTask[]
+  teamMemberships   teamMember[]
+  requestsCreated   storeRequest[]      @relation("RequestCreator")
+  requestsAssigned  storeRequest[]      @relation("RequestAssignee")
+  announcements     announcement[]      @relation("AnnouncementAuthor")
+  growthChecks      growthCheck[]       @relation("GrowthCheckAuthor")
+  brandOwner        brandOwner?
+  brandOwnerInvites brandOwner[]        @relation("BrandOwnerInviter")
 }
 
 model attachments {
@@ -62,7 +63,7 @@ model attachments {
   updatedAt     DateTime @updatedAt @db.Timestamptz(6)
   perfixPath    String?  @default("") @db.VarChar // folder1,folder2,folder3
   depth         Int?
-  metadata      Json?           @db.Json
+  metadata      Json?    @db.Json
 
   note    notes?    @relation(fields: [noteId], references: [id])
   account accounts? @relation(fields: [accountId], references: [id])
@@ -77,30 +78,30 @@ model config {
 }
 
 model notes {
-  id                Int             @id @default(autoincrement())
-  type              Int             @default(0)
-  content           String          @default("") @db.VarChar
-  isArchived        Boolean         @default(false)
-  isRecycle         Boolean         @default(false)
-  isShare           Boolean         @default(false)
-  isTop             Boolean         @default(false)
-  isReviewed        Boolean         @default(false)
-  sharePassword     String          @default("") @db.VarChar
-  shareEncryptedUrl String?         @db.VarChar
-  shareExpiryDate   DateTime?       @db.Timestamptz(6)
-  shareMaxView      Int?            @default(0)
-  shareViewCount    Int?            @default(0)
-  metadata          Json?           @db.Json
+  id                Int                 @id @default(autoincrement())
+  type              Int                 @default(0)
+  content           String              @default("") @db.VarChar
+  isArchived        Boolean             @default(false)
+  isRecycle         Boolean             @default(false)
+  isShare           Boolean             @default(false)
+  isTop             Boolean             @default(false)
+  isReviewed        Boolean             @default(false)
+  sharePassword     String              @default("") @db.VarChar
+  shareEncryptedUrl String?             @db.VarChar
+  shareExpiryDate   DateTime?           @db.Timestamptz(6)
+  shareMaxView      Int?                @default(0)
+  shareViewCount    Int?                @default(0)
+  metadata          Json?               @db.Json
   accountId         Int?
-  sortOrder         Int             @default(0)
-  createdAt         DateTime        @default(now()) @db.Timestamptz(6)
-  updatedAt         DateTime        @updatedAt @db.Timestamptz(6)
+  sortOrder         Int                 @default(0)
+  createdAt         DateTime            @default(now()) @db.Timestamptz(6)
+  updatedAt         DateTime            @updatedAt @db.Timestamptz(6)
   attachments       attachments[]
   tags              tagsToNote[]
-  account           accounts?       @relation(fields: [accountId], references: [id])
-  referencedBy      noteReference[] @relation("ReferencedNote")
-  references        noteReference[] @relation("ReferencingNote")
-  comments          comments[]      @relation("NoteComments")
+  account           accounts?           @relation(fields: [accountId], references: [id])
+  referencedBy      noteReference[]     @relation("ReferencedNote")
+  references        noteReference[]     @relation("ReferencingNote")
+  comments          comments[]          @relation("NoteComments")
   histories         noteHistory[]
   internalShares    noteInternalShare[]
 }
@@ -124,21 +125,21 @@ model comments {
 }
 
 model tag {
-  id         Int          @id @default(autoincrement())
-  name       String       @default("") @db.VarChar
-  icon       String       @default("") @db.VarChar
-  parent     Int          @default(0)
-  accountId  Int?
-  teamId     Int?
+  id            Int            @id @default(autoincrement())
+  name          String         @default("") @db.VarChar
+  icon          String         @default("") @db.VarChar
+  parent        Int            @default(0)
+  accountId     Int?
+  teamId        Int?
   // BouldHQ — soft-archive for stores. NULL = active. Set when a manager+ archives.
-  archivedAt   DateTime? @db.Timestamptz(6)
-  archivedById Int?
-  createdAt  DateTime     @default(now()) @db.Timestamptz(6)
-  updatedAt  DateTime     @updatedAt @db.Timestamptz(6)
-  tagsToNote tagsToNote[]
-  sortOrder  Int          @default(0)
-  account    accounts?    @relation(fields: [accountId], references: [id])
-  team       team?        @relation(fields: [teamId], references: [id])
+  archivedAt    DateTime?      @db.Timestamptz(6)
+  archivedById  Int?
+  createdAt     DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime       @updatedAt @db.Timestamptz(6)
+  tagsToNote    tagsToNote[]
+  sortOrder     Int            @default(0)
+  account       accounts?      @relation(fields: [accountId], references: [id])
+  team          team?          @relation(fields: [teamId], references: [id])
   storeProfile  storeProfile?
   storeRequests storeRequest[]
   brandOwner    brandOwner?
@@ -161,19 +162,21 @@ model team {
   tags          tag[]
   storeRequests storeRequest[]
   announcements announcement[]
+  growthChecks  growthCheck[]
+  growthTracks  growthTrack[]
 }
 
 // BouldHQ — broadcast notices. teamId NULL = global (founder-only).
 // category drives the section it appears in on /hq (announcement, changelog, workflow_update).
 model announcement {
-  id        Int      @id @default(autoincrement())
-  teamId    Int?
-  authorId  Int
-  category  String   @db.VarChar(20)  // 'announcement' | 'changelog' | 'workflow_update'
-  title     String   @db.VarChar(255)
-  body      String   @db.Text
+  id         Int      @id @default(autoincrement())
+  teamId     Int?
+  authorId   Int
+  category   String   @db.VarChar(20) // 'announcement' | 'changelog' | 'workflow_update'
+  title      String   @db.VarChar(255)
+  body       String   @db.Text
   pinned     Boolean  @default(false)
-  ownersOnly Boolean  @default(false)  // true = only visible in owner portal, hidden from /hq staff feed
+  ownersOnly Boolean  @default(false) // true = only visible in owner portal, hidden from /hq staff feed
   createdAt  DateTime @default(now()) @db.Timestamptz(6)
   updatedAt  DateTime @updatedAt @db.Timestamptz(6)
 
@@ -206,22 +209,22 @@ model storeRequest {
   tagId         Int
   createdById   Int
   assigneeId    Int?
-  source        String    @db.VarChar(20)  // 'text' | 'email' | 'screenshot' | 'voice'
+  source        String    @db.VarChar(20) // 'text' | 'email' | 'screenshot' | 'voice'
   rawBody       String    @db.Text
   attachmentIds Int[]
   triageResult  Json?
-  status        String    @db.VarChar(30)  // pending_triage|auto_running|auto_done|needs_assistance|in_progress|done
+  status        String    @db.VarChar(30) // pending_triage|auto_running|auto_done|needs_assistance|in_progress|done
   jobId         String?   @db.VarChar(100)
-  runLog        Json?     // BouldHQ Phase 7 — playbook execution log: { ok, steps[] }
+  runLog        Json? // BouldHQ Phase 7 — playbook execution log: { ok, steps[] }
   managerNotes  String?   @db.Text
   closedAt      DateTime? @db.Timestamptz(6)
   createdAt     DateTime  @default(now()) @db.Timestamptz(6)
   updatedAt     DateTime  @updatedAt @db.Timestamptz(6)
 
   team      team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  tag       tag       @relation(fields: [tagId],  references: [id], onDelete: Cascade)
-  createdBy accounts  @relation("RequestCreator",  fields: [createdById], references: [id])
-  assignee  accounts? @relation("RequestAssignee", fields: [assigneeId],  references: [id])
+  tag       tag       @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  createdBy accounts  @relation("RequestCreator", fields: [createdById], references: [id])
+  assignee  accounts? @relation("RequestAssignee", fields: [assigneeId], references: [id])
 
   @@index([teamId, status])
   @@index([tagId])
@@ -247,9 +250,51 @@ model storeProfile {
   createdAt        DateTime  @default(now()) @db.Timestamptz(6)
   updatedAt        DateTime  @updatedAt @db.Timestamptz(6)
 
-  tag           tag       @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  tag tag @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   @@index([accountId])
+}
+
+// BouldHQ Growth Engine — one row per *completed* task. Absence of a row means
+// unchecked, so unchecking is a delete and the table only ever holds real
+// progress. Granular rows (rather than one JSON blob per team) are what let two
+// people tick boxes at the same time without clobbering each other.
+//
+// `tagId` is 0 for the agency's own tracks and the store's tag id otherwise.
+// It is deliberately NOT a foreign key: 0 has no matching tag row. Rows for a
+// deleted store are inert — `growth.state` only reads checks for tags it lists.
+model growthCheck {
+  id          Int      @id @default(autoincrement())
+  teamId      Int
+  tagId       Int      @default(0)
+  scope       String   @db.VarChar(10) // 'agency' | 'weekly' | 'store' | 'monthly'
+  taskId      String   @db.VarChar(40) // stable id from shared/lib/growthBlueprints
+  checkedById Int?
+  checkedAt   DateTime @default(now()) @db.Timestamptz(6)
+
+  team      team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  checkedBy accounts? @relation("GrowthCheckAuthor", fields: [checkedById], references: [id])
+
+  @@unique([teamId, tagId, scope, taskId])
+  @@index([teamId, tagId])
+}
+
+// BouldHQ Growth Engine — per-track settings. One row for the agency (tagId 0,
+// where cycleStart is the current week) and one per tracked store (where
+// cycleStart is the current month). A store with no row is simply not being
+// tracked yet — that's how the UI knows to show the blueprint picker.
+model growthTrack {
+  id         Int      @id @default(autoincrement())
+  teamId     Int
+  tagId      Int      @default(0)
+  blueprint  String   @default("") @db.VarChar(10) // '' for agency; dtc|local|b2b|resale
+  cycleStart String   @default("") @db.VarChar(10) // YYYY-MM-DD weekly / YYYY-MM monthly
+  createdAt  DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @db.Timestamptz(6)
+
+  team team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, tagId])
 }
 
 // BouldHQ — a brand owner is the merchant we manage. They get a magic-link-only
@@ -265,9 +310,9 @@ model brandOwner {
   createdAt   DateTime @default(now()) @db.Timestamptz(6)
   updatedAt   DateTime @updatedAt @db.Timestamptz(6)
 
-  account    accounts @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  tag        tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
-  invitedBy  accounts @relation("BrandOwnerInviter", fields: [invitedById], references: [id])
+  account    accounts              @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  tag        tag                   @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  invitedBy  accounts              @relation("BrandOwnerInviter", fields: [invitedById], references: [id])
   magicLinks brandOwnerMagicLink[]
 }
 
@@ -438,38 +483,38 @@ model aiProviders {
   createdAt DateTime @default(now()) @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
-  models    aiModels[]
+  models aiModels[]
 }
 
 model aiModels {
-  id            Int      @id @default(autoincrement())
-  providerId    Int
-  title         String   @db.VarChar(255)
-  modelKey      String   @db.VarChar(255)
-  capabilities  Json     @db.Json
-  config        Json?    @db.Json
-  sortOrder     Int      @default(0)
-  createdAt     DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt     DateTime @updatedAt @db.Timestamptz(6)
+  id           Int      @id @default(autoincrement())
+  providerId   Int
+  title        String   @db.VarChar(255)
+  modelKey     String   @db.VarChar(255)
+  capabilities Json     @db.Json
+  config       Json?    @db.Json
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(6)
 
-  provider      aiProviders @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  provider aiProviders @relation(fields: [providerId], references: [id], onDelete: Cascade)
 
   @@index([providerId])
 }
 
 model aiScheduledTask {
-  id          Int      @id @default(autoincrement())
-  name        String   @db.VarChar(255)
-  prompt      String   @db.Text
-  schedule    String   @db.VarChar(100)
-  isEnabled   Boolean  @default(true)
-  lastRun     DateTime? @db.Timestamptz(6)
-  lastResult  Json?    @db.Json
-  accountId   Int
-  createdAt   DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
+  id         Int       @id @default(autoincrement())
+  name       String    @db.VarChar(255)
+  prompt     String    @db.Text
+  schedule   String    @db.VarChar(100)
+  isEnabled  Boolean   @default(true)
+  lastRun    DateTime? @db.Timestamptz(6)
+  lastResult Json?     @db.Json
+  accountId  Int
+  createdAt  DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt  DateTime  @updatedAt @db.Timestamptz(6)
 
-  account     accounts @relation(fields: [accountId], references: [id])
+  account accounts @relation(fields: [accountId], references: [id])
 
   @@index([accountId])
 }
@@ -478,12 +523,12 @@ model mcpServers {
   id          Int      @id @default(autoincrement())
   name        String   @db.VarChar(255)
   description String?  @db.Text
-  type        String   @db.VarChar(50)  // "stdio" | "sse" | "streamable-http"
-  command     String?  @db.Text         // for stdio: "npx" or full command
-  args        Json?    @db.Json         // for stdio: command arguments array
+  type        String   @db.VarChar(50) // "stdio" | "sse" | "streamable-http"
+  command     String?  @db.Text // for stdio: "npx" or full command
+  args        Json?    @db.Json // for stdio: command arguments array
   url         String?  @db.VarChar(500) // for sse/streamable-http
-  env         Json?    @db.Json         // environment variables
-  headers     Json?    @db.Json         // HTTP headers for sse/http
+  env         Json?    @db.Json // environment variables
+  headers     Json?    @db.Json // HTTP headers for sse/http
   isEnabled   Boolean  @default(true)
   createdAt   DateTime @default(now()) @db.Timestamptz(6)
   updatedAt   DateTime @updatedAt @db.Timestamptz(6)
@@ -491,13 +536,13 @@ model mcpServers {
 
 model fonts {
   id          Int      @id @default(autoincrement())
-  name        String   @db.VarChar(255)           // Font family name (e.g., "Roboto")
-  displayName String   @db.VarChar(255)           // Display name in UI
-  url         String?  @db.Text                   // CDN URL for the font CSS (Google Fonts style)
-  fileData    Bytes?   @db.ByteA                  // Font 
-  isLocal     Boolean  @default(false)            // True if font is loaded from local files
+  name        String   @db.VarChar(255) // Font family name (e.g., "Roboto")
+  displayName String   @db.VarChar(255) // Display name in UI
+  url         String?  @db.Text // CDN URL for the font CSS (Google Fonts style)
+  fileData    Bytes?   @db.ByteA // Font 
+  isLocal     Boolean  @default(false) // True if font is loaded from local files
   isSystem    Boolean  @default(false)
-  weights     Json     @db.Json                   // Available weights: [400, 500, 700]
+  weights     Json     @db.Json // Available weights: [400, 500, 700]
   category    String   @default("sans-serif") @db.VarChar(50) // serif, sans-serif, monospace, display, handwriting
   sortOrder   Int      @default(0)
   createdAt   DateTime @default(now()) @db.Timestamptz(6)
