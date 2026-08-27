@@ -11,6 +11,8 @@ import { t } from "i18next";
 import { ToastPlugin } from "./module/Toast/Toast";
 import { DialogStore } from "./module/Dialog";
 import { Button, Input } from "@heroui/react";
+import axiosInstance from "@/lib/axios";
+import { getBlinkoEndpoint } from "@/lib/blinkoEndpoint";
 
 export class ResourceStore implements Store {
   sid = 'resourceStore';
@@ -24,6 +26,14 @@ export class ResourceStore implements Store {
   htmlPreview: { name: string; path: string } | null = null;
   previewHtml(file: { name: string; path: string }) { this.htmlPreview = file; }
   closeHtmlPreview() { this.htmlPreview = null; }
+
+  // BouldHQ — in-app image lightbox state. `src` is a fully-resolved,
+  // token-bearing URL (built by the caller via getBlinkoEndpoint). Driven from
+  // the row click so it's reliable even though the thumbnail lives inside a
+  // drag-and-drop row.
+  imagePreview: { src: string } | null = null;
+  previewImage(src: string) { this.imagePreview = { src }; }
+  closeImagePreview() { this.imagePreview = null; }
 
   constructor() {
     makeAutoObservable(this);
@@ -235,6 +245,58 @@ export class ResourceStore implements Store {
         );
       }
     });
+  };
+
+  // Upload OS files (dragged from Finder/Explorer, or picked) into the folder
+  // currently open in Resources. When a whole folder is dropped, each file
+  // carries a relative path (react-dropzone sets `file.path`) so we recreate
+  // the subfolder structure under the current folder. Folders in Resources are
+  // derived from each file's `perfixPath`, so no placeholder rows are needed.
+  uploadFiles = async (files: File[]) => {
+    const list = Array.from(files || []);
+    if (list.length === 0) return;
+
+    const baseSegs = this.currentFolder
+      ? this.currentFolder.split('/').filter(Boolean)
+      : [];
+
+    let done = 0;
+    let failed = 0;
+
+    const doUpload = async () => {
+      for (const file of list) {
+        const rel = ((file as any).path || (file as any).webkitRelativePath || file.name) as string;
+        const relDirSegs = rel.replace(/^\/+/, '').split('/').slice(0, -1).filter(Boolean);
+        const folder = [...baseSegs, ...relDirSegs].join(',');
+
+        const fd = new FormData();
+        fd.append('file', file);
+        if (folder) fd.append('folder', folder);
+
+        try {
+          await axiosInstance.post(getBlinkoEndpoint('/api/file/upload'), fd);
+          done++;
+        } catch (e) {
+          failed++;
+          console.error('resource upload failed', rel, e);
+        }
+      }
+      if (failed > 0 && done === 0) throw new Error(`Upload failed (${failed} file${failed > 1 ? 's' : ''})`);
+    };
+
+    const where = this.currentFolder ? `"${this.currentFolder.split('/').pop()}"` : 'Resources';
+    await RootStore.Get(ToastPlugin).promise(doUpload(), {
+      loading: `Uploading ${list.length} file${list.length > 1 ? 's' : ''}…`,
+      // Functions so the message reflects the final counts (react-hot-toast
+      // evaluates these after the promise settles).
+      success: () => failed > 0
+        ? `Uploaded ${done} of ${list.length} to ${where}`
+        : `Added ${done} file${done > 1 ? 's' : ''} to ${where}`,
+      error: 'Upload failed',
+    });
+
+    this.refreshTicker++;
+    this.clearSelection();
   };
 
   moveToParentFolder = async (items: ResourceType[]) => {

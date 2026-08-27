@@ -118,11 +118,6 @@ export async function importFolderIntoWorkdir(
   });
 }
 
-// Escape a string for use inside an AppleScript "string literal".
-function asEscape(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-}
-
 // Shopify CLI prefers the bare myshopify.com host. The stored URL might have
 // a protocol and/or a trailing slash — normalize.
 function normalizeShopifyStore(raw?: string): string {
@@ -130,82 +125,132 @@ function normalizeShopifyStore(raw?: string): string {
   return raw.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
 }
 
-// Open iTerm with a two-pane layout already cd'd into themeDir.
-//   Left pane (large):  cd <themeDir>; clear; claude
-//   Right pane (small): cd <themeDir>; clear; shopify theme dev --store <url>
-// storeUrl is optional — if absent, the --store flag is omitted and the
-// shopify CLI will prompt for one.
-// Falls back to Terminal.app if iTerm isn't installed.
-export async function openInIterm(
+// The Shopify theme-export folder name reliably encodes the REAL myshopify
+// handle, which the store profile's URL often doesn't (it may be a custom
+// domain or a stale handle). Shopify's exporter names folders like
+//   theme_export__<subdomain-with-dashes>-myshopify-com-<themeName>__<date>
+// e.g. theme_export__j1wxtd-1w-myshopify-com-horizon__24JUN2026-0439pm
+//      → j1wxtd-1w.myshopify.com
+// The subdomain itself can contain literal dashes (j1wxtd-1w, joon-distribution),
+// so we only collapse the fixed "-myshopify-com" marker back to ".myshopify.com".
+export function shopifyHandleFromThemeExport(themeDir: string): string | null {
+  const base = path.basename(themeDir);
+  const m = base.match(/^theme_export__(.+?)-myshopify-com[-_]/i);
+  return m ? `${m[1]}.myshopify.com` : null;
+}
+
+// The store to pass to `shopify theme dev --store`. Prefer the handle encoded
+// in the theme_export folder name (ground truth for what was pulled), then the
+// profile URL, then nothing (CLI will prompt).
+export function resolveShopifyStore(themeDir: string, storeUrl?: string): string {
+  return shopifyHandleFromThemeExport(themeDir) || normalizeShopifyStore(storeUrl) || '';
+}
+
+// Write a `.vscode/tasks.json` (+ a settings.json nudge) into `folder` so that
+// opening it in a VS Code-family IDE (Antigravity) auto-launches each command
+// in its own integrated terminal. Antigravity has no CLI to run terminal
+// commands, so run-on-folderOpen tasks are the only automatic mechanism.
+//
+// NOTE: this file lands inside the theme's git checkout as an untracked file —
+// acceptable. We overwrite our managed tasks wholesale (we own this file's
+// purpose in the ops workflow). The first open of each folder still shows
+// Antigravity's Workspace-Trust + "Allow Automatic Tasks" prompts (security
+// gates that can't be bypassed programmatically); after allowing once it's
+// smooth.
+async function writeAutoRunTasks(
+  folder: string,
+  tasks: { label: string; command: string; background?: boolean }[],
+): Promise<void> {
+  const vscodeDir = path.join(folder, '.vscode');
+  await fs.mkdir(vscodeDir, { recursive: true });
+
+  const tasksJson = {
+    version: '2.0.0',
+    tasks: tasks.map((t) => ({
+      label: t.label,
+      type: 'shell',
+      command: t.command,
+      isBackground: !!t.background,
+      options: { cwd: '${workspaceFolder}' },
+      presentation: {
+        panel: 'dedicated',
+        group: 'opsconsole',
+        reveal: 'always',
+        focus: false,
+        echo: true,
+        clear: true,
+      },
+      runOptions: { runOn: 'folderOpen' },
+      problemMatcher: [],
+    })),
+  };
+  await fs.writeFile(path.join(vscodeDir, 'tasks.json'), JSON.stringify(tasksJson, null, 2) + '\n', 'utf8');
+
+  // Best-effort: don't clobber an existing settings.json — merge the one key.
+  const settingsPath = path.join(vscodeDir, 'settings.json');
+  let settings: Record<string, unknown> = {};
+  try {
+    settings = JSON.parse(await fs.readFile(settingsPath, 'utf8'));
+    if (typeof settings !== 'object' || settings === null) settings = {};
+  } catch { /* no existing settings */ }
+  settings['task.allowAutomaticTasks'] = 'on';
+  await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf8');
+}
+
+// Open a folder as a workspace in Antigravity. Antigravity ships no folder-open
+// CLI on PATH, so we go through macOS `open -a`. Try the newer "Antigravity IDE"
+// bundle first, fall back to "Antigravity".
+async function openFolderInAntigravity(folder: string): Promise<void> {
+  const tryOpen = (appName: string): Promise<boolean> =>
+    new Promise((resolve) => {
+      const proc = spawn('open', ['-a', appName, folder], { stdio: ['ignore', 'ignore', 'pipe'] });
+      proc.on('error', () => resolve(false));
+      proc.on('close', (code) => resolve(code === 0));
+    });
+
+  if (await tryOpen('Antigravity IDE')) return;
+  if (await tryOpen('Antigravity')) return;
+  throw new Error('Could not launch Antigravity IDE. Is it installed in /Applications?');
+}
+
+// Open the store's theme folder in Antigravity IDE with two integrated
+// terminals auto-started:
+//   - shopify theme dev --store <handle>   (the store preview server)
+//   - claude                                (the agent, cwd = theme folder)
+// The `--store` handle is resolved from the theme_export folder name (ground
+// truth) with the profile URL as a fallback — see resolveShopifyStore. If we
+// can't determine a store, the flag is omitted and the CLI prompts.
+export async function openInAntigravity(
   themeDir: string,
   storeName: string,
   storeUrl?: string,
+  devServerPort?: number,
 ): Promise<void> {
   await fs.access(themeDir).catch(() => {
     throw new Error(`Theme folder does not exist: ${themeDir}. Import the folder first.`);
   });
 
-  const cdEsc = asEscape(themeDir);
-  const normalizedStore = normalizeShopifyStore(storeUrl);
-  const shopifyCmd = normalizedStore
-    ? `shopify theme dev --store ${asEscape(normalizedStore)}`
-    : `shopify theme dev`;
+  const store = resolveShopifyStore(themeDir, storeUrl);
+  let dev = 'shopify theme dev';
+  if (store) dev += ` --store ${store}`;
+  if (devServerPort) dev += ` --port ${devServerPort}`;
 
-  // iTerm AppleScript notes:
-  //   - Capture leftSession BEFORE splitting; `split vertically` shifts focus,
-  //     so a later `current session` would point at the right pane.
-  //   - Bind theWindow so we don't pick up a stale `current window` if the
-  //     user already has other iTerm windows open.
-  //   - Issue write text calls AFTER the split so each pane has its own PTY.
-  const itermScript = `
-tell application "iTerm"
-  activate
-  set theWindow to (create window with default profile)
-  tell theWindow
-    set leftSession to current session
-    set rightSession to missing value
-    tell leftSession
-      set rightSession to (split vertically with default profile)
-    end tell
-    delay 0.25
-    tell leftSession
-      write text "cd \\"${cdEsc}\\" && clear && claude"
-    end tell
-    tell rightSession
-      write text "cd \\"${cdEsc}\\" && clear && ${shopifyCmd}"
-    end tell
-  end tell
-end tell
-`.trim();
-
-  const itermOk = await runOsa(itermScript).catch(() => false);
-  if (itermOk) return;
-
-  // Fallback: Terminal.app. We open TWO separate windows (not "in newWindow"
-  // — that would route the second command into the first window's PTY, which
-  // once `claude` starts becomes Claude's stdin, smushing both commands into
-  // Claude's first user message).
-  const terminalScript = `
-tell application "Terminal"
-  activate
-  do script "cd \\"${cdEsc}\\" && clear && claude"
-  delay 0.5
-  do script "cd \\"${cdEsc}\\" && clear && ${shopifyCmd}"
-end tell
-`.trim();
-  await runOsa(terminalScript);
+  await writeAutoRunTasks(themeDir, [
+    { label: 'Shopify theme dev', command: dev, background: true },
+    { label: 'Claude', command: 'claude' },
+  ]);
+  await openFolderInAntigravity(themeDir);
 }
 
-// Open iTerm at the STORE ROOT (not the theme dir) with claude resuming the
-// agent's most recent session for that store. Used for "Connect" on a specific
-// request — manager picks up exactly where the autonomous agent left off, with
-// all the materialized context in `.bouldhq/` still in place.
+// Open Antigravity IDE at the STORE ROOT (not the theme dir) with claude
+// resuming the agent's most recent session for that store. Used for "Connect"
+// on a specific request — manager picks up exactly where the autonomous agent
+// left off, with all the materialized context in `.bouldhq/` still in place.
 //
 // Why store root, not theme dir: the agent ran with cwd = store root, so its
 // session history + `.bouldhq/result.json` + `.bouldhq/requests/request-<id>.md`
-// all live here. `claude --continue` from this folder picks them up. The
-// manager can `cd` into the theme folder once they're in claude.
-export async function openRequestInIterm(
+// all live here. `claude --continue` from this folder picks them up.
+export async function openRequestInAntigravity(
   storeName: string,
   requestId: number,
 ): Promise<void> {
@@ -214,45 +259,11 @@ export async function openRequestInIterm(
     throw new Error(`Store workdir does not exist: ${workdir}. Create the store first.`);
   });
 
-  const cdEsc = asEscape(workdir);
-  const banner = `echo '— Picking up BouldHQ request #${requestId} for ${storeName} —'`;
   // claude --continue resumes the most recent session in cwd. The agent's
   // last `claude -p` run is what we want to land on.
-  const claudeCmd = `${banner} && claude --continue`;
+  const claudeCmd =
+    `echo '— Picking up BouldHQ request #${requestId} for ${storeName} —' && claude --continue`;
 
-  const itermScript = `
-tell application "iTerm"
-  activate
-  set theWindow to (create window with default profile)
-  tell theWindow
-    tell current session
-      write text "cd \\"${cdEsc}\\" && clear && ${claudeCmd}"
-    end tell
-  end tell
-end tell
-`.trim();
-
-  const itermOk = await runOsa(itermScript).catch(() => false);
-  if (itermOk) return;
-
-  const terminalScript = `
-tell application "Terminal"
-  activate
-  do script "cd \\"${cdEsc}\\" && clear && ${claudeCmd}"
-end tell
-`.trim();
-  await runOsa(terminalScript);
-}
-
-function runOsa(script: string): Promise<true> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn('osascript', ['-e', script], { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stderr = '';
-    proc.stderr.on('data', (b) => { stderr += b.toString(); });
-    proc.on('error', (err) => reject(err));
-    proc.on('close', (code) => {
-      if (code === 0) return resolve(true);
-      reject(new Error(`osascript failed (${code}): ${stderr.trim() || 'no stderr'}`));
-    });
-  });
+  await writeAutoRunTasks(workdir, [{ label: `Claude (request #${requestId})`, command: claudeCmd }]);
+  await openFolderInAntigravity(workdir);
 }

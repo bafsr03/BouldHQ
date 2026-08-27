@@ -1,6 +1,5 @@
 import { Card, Checkbox, Tooltip } from '@heroui/react';
 import { Icon } from '@/components/Common/Iconify/icons';
-import { PhotoProvider, PhotoView } from 'react-photo-view';
 import filesize  from 'filesize';
 import dayjs from '@/lib/dayjs';
 import { FileIcons } from '@/components/Common/AttachmentRender/FileIcon';
@@ -52,13 +51,9 @@ export const ResourceItemPreview = ({
   return (
     <div className={`w-full flex items-center gap-2 p-2 rounded-md cursor-pointer group ${className}`} onClick={onClick}>
       {isImage ? (
-        <PhotoProvider>
-          <PhotoView src={getBlinkoEndpoint(`${item.path}?token=${RootStore.Get(UserStore).tokenData.value?.token}`)}>
-            <div>
-              <ImageThumbnailRender src={item.path} className="!w-[28px] !h-[28px] object-cover rounded" />
-            </div>
-          </PhotoView>
-        </PhotoProvider>
+        <div className="w-[28px] h-[28px] shrink-0">
+          <ImageThumbnailRender src={item.path} className="!w-[28px] !h-[28px] object-cover rounded" />
+        </div>
       ) : (
         <div className="w-[28px] h-[28px] flex items-center justify-center">
           <FileIcons path={item.path} size={28} />
@@ -199,7 +194,14 @@ const ResourceItem = observer(({ item, index, onSelect, isSelected, onFolderClic
     return name.endsWith('.pdf') || type === 'application/pdf';
   }, [item.isFolder, item.name, item.type]);
 
-  const openableInTab = isHtmlFile || isPdfFile;
+  const isImageFile = useMemo(() => {
+    if (item.isFolder) return false;
+    const name = (item.name || '').toLowerCase();
+    const type = (item.type || '').toLowerCase();
+    return type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|tiff?|ico|avif|svg)$/.test(name);
+  }, [item.isFolder, item.name, item.type]);
+
+  const openableInTab = isHtmlFile || isPdfFile || isImageFile;
 
   const handleClick = useMemo(
     () => (e: React.MouseEvent) => {
@@ -220,9 +222,18 @@ const ResourceItem = observer(({ item, index, onSelect, isSelected, onFolderClic
         const token = RootStore.Get(UserStore).tokenData.value?.token;
         const url = getBlinkoEndpoint(`${item.path}${token ? `?token=${encodeURIComponent(token)}` : ''}`);
         window.open(url, '_blank', 'noopener,noreferrer');
+        return;
+      }
+      // Images open in an in-app fullscreen lightbox. Driven from the row click
+      // (not a thumbnail-wrapped PhotoView) so it's reliable inside the DnD row.
+      if (isImageFile && item.path) {
+        e.preventDefault();
+        const token = RootStore.Get(UserStore).tokenData.value?.token;
+        const url = getBlinkoEndpoint(`${item.path}${token ? `?token=${encodeURIComponent(token)}` : ''}`);
+        RootStore.Get(ResourceStore).previewImage(url);
       }
     },
-    [item.isFolder, item.folderName, item.path, item.name, onFolderClick, isHtmlFile, isPdfFile],
+    [item.isFolder, item.folderName, item.path, item.name, onFolderClick, isHtmlFile, isPdfFile, isImageFile],
   );
 
   const draggableId = useMemo(() => (item.isFolder ? `folder-${item.folderName}` : String(item.id)), [item.isFolder, item.folderName, item.id]);

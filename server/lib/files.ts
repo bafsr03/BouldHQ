@@ -310,6 +310,28 @@ export class FileService {
   }
 
   /**
+   * Overwrite an existing file's bytes in place (same path/filename). Used by
+   * the in-app resource editor. Returns the new byte size. Does not touch the
+   * attachment row — the caller updates `size` after.
+   */
+  static async updateFileContent(api_attachment_path: string, buffer: Buffer): Promise<number> {
+    const config = await getGlobalConfig({ useAdmin: true });
+    if (config.objectStorage === 's3' || api_attachment_path.includes('/api/s3file/')) {
+      const { s3ClientInstance } = await this.getS3Client();
+      const fileName = this.extractAndValidatePath(api_attachment_path);
+      await s3ClientInstance.send(new PutObjectCommand({
+        Bucket: config.s3Bucket,
+        Key: fileName,
+        Body: buffer,
+      }));
+    } else {
+      const localPath = this.extractAndValidatePath(api_attachment_path);
+      await writeFile(localPath, buffer);
+    }
+    return buffer.length;
+  }
+
+  /**
    * Get temporary file path (creates local copy for S3 files)
    * WARNING: This method creates temporary files for S3 storage. Use getFileBuffer() when possible.
    * Remember to clean up the returned path for S3 files after use.
@@ -351,11 +373,34 @@ export class FileService {
     }
   }
 
+  // Turn a caller-supplied folder ("A,B" or "A/B") into a safe, trailing-slash
+  // path segment ("A/B/") for nesting an upload, or '' for the root.
+  //
+  // Folder names are preserved VERBATIM (spaces, dots, case) — resource folders
+  // are keyed by their exact `perfixPath` (e.g. "Branding Assets,Rosn-Os"), so
+  // running each segment through the filename sanitizer (which turns spaces into
+  // underscores) would drop the upload into a different, sibling folder. We only
+  // strip traversal/empty segments and any embedded separators; the final
+  // resolved path is still guarded by validateAndResolvePath.
+  static sanitizeFolderPath(folder?: string): string {
+    if (!folder) return '';
+    const segments = folder
+      .split(/[/,]/)
+      .map((s) => s.replace(/[\\/\0]/g, '').trim())
+      .filter((s) => s && s !== '.' && s !== '..');
+    return segments.length ? segments.join('/') + '/' : '';
+  }
+
   static async uploadFileStream(
     {
-      stream, originalName, fileSize, type, accountId, metadata
+      stream, originalName, fileSize, type, accountId, metadata, folder
     }: {
-      stream: ReadableStream, originalName: string, fileSize: number, type: string, accountId: number, metadata?: any
+      stream: ReadableStream, originalName: string, fileSize: number, type: string, accountId: number, metadata?: any,
+      // Optional destination folder as a comma- or slash-separated path
+      // (matching the resource `perfixPath` convention, e.g. "Branding,Logos").
+      // When set, the file is stored nested under that path so createAttachment
+      // records the right perfixPath and it shows inside that folder.
+      folder?: string
     }) {
     const config = await getGlobalConfig({ useAdmin: true });
     const extension = path.extname(originalName);
@@ -363,6 +408,12 @@ export class FileService {
     const baseName = sanitizeUploadFileName(rawBaseName);
     const timestamp = Date.now();
     const timestampedFileName = `${baseName}_${timestamp}${extension}`;
+
+    // Sanitize the folder into a safe slash path. Each segment is run through
+    // the same filename sanitizer; empty and dot segments are dropped so a
+    // client can't traverse out of the uploads dir. validateAndResolvePath /
+    // the S3 key build below still guard the final path.
+    const folderPrefix = FileService.sanitizeFolderPath(folder);
 
     try {
       if (config.objectStorage === 's3') {
@@ -374,7 +425,7 @@ export class FileService {
           customPath = customPath.endsWith('/') ? customPath : customPath + '/';
         }
 
-        const s3Key = `${customPath}${timestampedFileName}`.replace(/^\//, '');
+        const s3Key = `${customPath}${folderPrefix}${timestampedFileName}`.replace(/^\//, '');
 
         const passThrough = new PassThrough();
         const nodeReadable = Readable.fromWeb(stream as any);
@@ -427,7 +478,7 @@ export class FileService {
           customPath = customPath.endsWith('/') ? customPath : customPath + '/';
         }
 
-        const relativePath = `${customPath}${timestampedFileName}`.replace(/^\//, '');
+        const relativePath = `${customPath}${folderPrefix}${timestampedFileName}`.replace(/^\//, '');
         const fullPath = this.validateAndResolvePath(relativePath);
         await fs.mkdir(path.dirname(fullPath), { recursive: true });
 

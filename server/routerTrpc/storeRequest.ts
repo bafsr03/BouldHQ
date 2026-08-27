@@ -8,7 +8,7 @@ import {
 } from '@server/middleware';
 import { triageStoreRequest, statusFromTriage } from '@server/lib/triage';
 import { runPlaybook } from '@server/lib/playbookRunner';
-import { openRequestInIterm } from '@server/lib/opsConsole';
+import { openRequestInAntigravity } from '@server/lib/opsConsole';
 
 // Fire-and-forget triage. Runs the LLM classifier, writes triageResult, and
 // transitions status. If the LLM isn't configured the request stays in
@@ -247,9 +247,9 @@ export const storeRequestRouter = router({
       });
       if (!tag) throw new TRPCError({ code: 'NOT_FOUND', message: 'Store tag not found' });
       try {
-        await openRequestInIterm(tag.name, req.id);
+        await openRequestInAntigravity(tag.name, req.id);
       } catch (err: any) {
-        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err?.message || 'Could not open terminal' });
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: err?.message || 'Could not open Antigravity IDE' });
       }
       return { ok: true };
     }),

@@ -10,7 +10,7 @@ import {
 import { hashPassword } from '@prisma/seed';
 import { randomBytes } from 'crypto';
 import {
-  workdirFor, themeDirFor, importFolderIntoWorkdir, openInIterm,
+  workdirFor, themeDirFor, importFolderIntoWorkdir, openInAntigravity, resolveShopifyStore,
 } from '@server/lib/opsConsole';
 import fs from 'fs/promises';
 import path from 'path';
@@ -605,6 +605,11 @@ export const storeProfileRouter = router({
       themeSource: z.enum(['explicit', 'theme_export', 'workdir', 'missing']),
       previewUrl: z.string(),
       storeUrl: z.string(),
+      // The resolved `shopify theme dev --store` handle — derived from the
+      // theme_export folder name when available, else the profile URL. Shown in
+      // the UI so the corrected target (e.g. runitbackclassics.myshopify.com,
+      // not the profile's run-it-back-classics) is visible.
+      shopifyStore: z.string(),
     }))
     .query(async ({ input, ctx }) => {
       const tag = await prisma.tag.findFirst({
@@ -623,12 +628,14 @@ export const storeProfileRouter = router({
         themeSource: source,
         previewUrl: `http://127.0.0.1:${profile?.devServerPort ?? 9292}`,
         storeUrl: profile?.storeUrl ?? '',
+        shopifyStore: resolveShopifyStore(themeDir, profile?.storeUrl ?? ''),
       };
     }),
 
-  // Launches iTerm with the two-pane layout. The server runs on the manager's
-  // own machine, so it can drive AppleScript locally. Returns the preview URL
-  // the caller should open after a delay to give shopify theme dev time to boot.
+  // Opens the store's theme folder in Antigravity IDE and auto-starts
+  // `shopify theme dev` + `claude` in its integrated terminals. The server runs
+  // on the manager's own machine, so it can launch the app locally. Returns the
+  // preview URL the caller opens after a delay to give the dev server time to boot.
   openInTerminal: managerProcedure
     .input(z.object({ tagId: z.number() }))
     .output(z.object({ ok: z.boolean(), previewUrl: z.string() }))
@@ -641,11 +648,11 @@ export const storeProfileRouter = router({
       const { themeDir } = await themeDirFor(tag.name, profile?.localThemePath ?? '');
 
       try {
-        await openInIterm(themeDir, tag.name, profile?.storeUrl ?? undefined);
+        await openInAntigravity(themeDir, tag.name, profile?.storeUrl ?? undefined, profile?.devServerPort ?? undefined);
       } catch (err: any) {
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
-          message: err?.message ?? 'Failed to launch iTerm',
+          message: err?.message ?? 'Failed to launch Antigravity IDE',
         });
       }
       return { ok: true, previewUrl: `http://127.0.0.1:${profile?.devServerPort ?? 9292}` };

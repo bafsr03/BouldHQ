@@ -13,12 +13,23 @@ import { HtmlPreviewModal } from "@/components/BouldHQ/HtmlPreviewModal";
 import { Breadcrumbs, BreadcrumbItem, Button } from "@heroui/react";
 import { AnimatePresence, motion } from "framer-motion";
 import { LoadingAndEmpty } from "@/components/Common/LoadingAndEmpty";
-import { PhotoProvider } from "react-photo-view";
+import { PhotoProvider, PhotoSlider } from "react-photo-view";
 import { useNavigate, Link } from "react-router-dom";
+import { useDropzone } from "react-dropzone";
 const Page = observer(() => {
   const navigate = useNavigate();
   const resourceStore = RootStore.Get(ResourceStore);
   const { t } = useTranslation();
+
+  // Drag files/folders from the OS (Finder/Explorer) straight into the folder
+  // you're viewing. noClick so it doesn't hijack clicks on the list; the
+  // "Upload" button opens the picker via open().
+  const onDrop = useCallback((accepted: File[]) => {
+    if (accepted?.length) resourceStore.uploadFiles(accepted);
+  }, [resourceStore]);
+  const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
+    onDrop, noClick: true, noKeyboard: true, multiple: true,
+  });
   const resources = useMemo(() => {
     const allResources = toJS(resourceStore.blinko.resourceList.value) || [];
     // Filter out .folder placeholder files
@@ -53,6 +64,19 @@ const Page = observer(() => {
           onBottom={resourceStore.loadNextPage}
           className="md:px-6 h-[calc(100%_-_5px)] md:h-[calc(100vh_-_100px)] px-2 md:max-w-[1000px] w-full overflow-x-hidden mx-auto"
         >
+          <div {...getRootProps()} className="relative min-h-full outline-none">
+          {isDragActive && (
+            <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center rounded-xl border-2 border-dashed border-primary bg-primary/10 backdrop-blur-[1px]">
+              <div className="flex flex-col items-center gap-2 text-primary">
+                <Icon icon="tabler:upload" width={40} height={40} />
+                <div className="text-sm font-medium">
+                  {resourceStore.currentFolder
+                    ? `Drop to add to "${resourceStore.currentFolder.split('/').pop()}"`
+                    : 'Drop files to add to Resources'}
+                </div>
+              </div>
+            </div>
+          )}
           <Link
             to="/ai"
             className="flex items-center gap-3 rounded-xl border border-divider bg-content1 hover:border-primary hover:bg-primary/5 transition-colors px-4 py-2.5 mb-3 mt-2"
@@ -111,6 +135,27 @@ const Page = observer(() => {
             </div>
 
             <div className="flex items-center gap-2 mt-2 ">
+              <input {...getInputProps()} />
+              <motion.div
+                initial={{ x: 20, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: 20, opacity: 0 }}
+                transition={{
+                  type: "spring",
+                  stiffness: 300,
+                  damping: 25
+                }}
+              >
+                <Button
+                  size="sm"
+                  variant="bordered"
+                  onPress={open}
+                  startContent={<Icon icon="tabler:upload" className="w-5 h-5" />}
+                >
+                  {t('upload')}
+                </Button>
+              </motion.div>
+
               <motion.div
                 initial={{ x: 20, opacity: 0 }}
                 animate={{ x: 0, opacity: 1 }}
@@ -220,7 +265,7 @@ const Page = observer(() => {
             )}
 
           </PhotoProvider>
-
+          </div>
         </ScrollArea>
       </DragDropContext>
       <ResourceMultiSelectPop />
@@ -229,6 +274,12 @@ const Page = observer(() => {
         onClose={() => resourceStore.closeHtmlPreview()}
         fileName={resourceStore.htmlPreview?.name ?? ''}
         filePath={resourceStore.htmlPreview?.path ?? null}
+        editable
+      />
+      <PhotoSlider
+        images={resourceStore.imagePreview ? [{ src: resourceStore.imagePreview.src, key: 'preview' }] : []}
+        visible={!!resourceStore.imagePreview}
+        onClose={() => resourceStore.closeImagePreview()}
       />
     </>
   );

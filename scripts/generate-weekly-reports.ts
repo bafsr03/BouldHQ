@@ -65,28 +65,33 @@ async function fileToDataUri(absPath: string, maxHeight = 0): Promise<string | n
   }
 }
 
-// The five plain-English SEO improvements we lead with on a first report. These
-// apply to any Shopify store and are written for a store owner, not a developer.
+// The SEO improvements we lead with on a first report. These apply to any
+// Shopify store and are written for a store owner, not a developer. Each one
+// says plainly *what* we do and *why* it moves rankings and sales.
 const SEO_TASKS: Array<{ title: string; body: string }> = [
   {
     title: 'Sharpen your page titles & descriptions',
-    body: 'We rewrite the little title and blurb Google shows for your store so it reads clearly and makes people want to click.',
+    body: 'The title and short blurb Google shows for each page are your first impression in search results. We rewrite them so they read clearly, include the words shoppers actually search, and give people a reason to click — which lifts both your ranking and the share of searchers who choose you over a competitor.',
   },
   {
     title: 'Fill in product details & image text',
-    body: 'Every product gets a proper description and image labels — this helps you turn up in Google searches and Google Images.',
+    body: 'Google can only rank what it can read. We give every product a complete, keyword-rich description and add alt text to your images, so your pages show up in regular Google searches and in Google Images — and so the listings make sense to a shopper before they even land on your store.',
   },
   {
     title: 'Speed up your store',
-    body: 'Faster pages rank higher and lose fewer shoppers. We find what is slowing things down and trim it.',
+    body: 'Page speed is a direct ranking factor and a major reason shoppers bounce. We measure what is slowing your store down — oversized images, heavy scripts, slow theme code — and trim it so pages load fast on mobile, where most of your traffic is. Faster pages rank higher and convert more of the visitors you already have.',
   },
   {
     title: 'Use the words your customers search',
-    body: 'We match your product wording to what people actually type into Google, so the right buyers find you.',
+    body: 'We research the exact phrases your buyers type into Google — including the longer, more specific ones with real buying intent — and weave them naturally into your product and collection pages. The result: the right customers find the right product instead of bouncing off a page that never mentioned what they were looking for.',
   },
   {
     title: 'Tidy up your store’s structure & links',
-    body: 'A clean, well-linked layout makes it easy for both Google and shoppers to find everything you sell.',
+    body: 'A clean layout with smart internal links helps Google understand how your store fits together and spreads ranking strength to your most important pages. It also makes it effortless for shoppers to move from a blog post or collection straight to the products they want to buy.',
+  },
+  {
+    title: 'Get the technical foundation right',
+    body: 'Behind the scenes we make sure Google can crawl and index everything correctly — clean URLs, no duplicate or broken pages, a healthy sitemap, and proper tags so search engines never get confused about which page to show. This is the groundwork that makes every other improvement stick.',
   },
 ];
 
@@ -171,6 +176,12 @@ function reportHtml(opts: {
     align-items: center; justify-content: center; font-size: 13px; font-weight: 700;
     background: rgba(167, 139, 250, 0.18); color: var(--brand-accent); }
   .step-body strong { color: var(--text); }
+  ul.roadmap { list-style: none; padding: 0; margin: 4px 0 0; }
+  ul.roadmap li { position: relative; padding-left: 22px; margin: 0 0 12px; line-height: 1.6; }
+  ul.roadmap li:last-child { margin-bottom: 0; }
+  ul.roadmap li::before { content: ''; position: absolute; left: 4px; top: 9px; width: 7px; height: 7px;
+    border-radius: 999px; background: var(--brand-success); }
+  ul.roadmap li strong { color: var(--text); }
   footer { text-align: center; color: var(--muted); font-size: 11.5px; margin-top: 44px;
     padding-top: 20px; border-top: 1px solid var(--hairline); }
   footer img { height: 14px; width: auto; vertical-align: middle; }
@@ -211,15 +222,36 @@ function reportHtml(opts: {
     </section>
 
     <section class="card">
-      <h2>This week’s focus — 5 ways we’ll improve your SEO</h2>
+      <h2>This week’s focus — how we’ll improve your SEO</h2>
+      <p>SEO is simply the work that helps ${storeName} show up when people search Google
+      for what you sell — and turns more of those searchers into shoppers. Here is exactly
+      what we’re working on, in plain English, and why each piece matters:</p>
       <ul class="plan">${tasks}</ul>
     </section>
 
     <section class="card">
       <h2>What happens next</h2>
-      <p>We’ll start on the steps above this week and report back on progress in your
-      next update. If you have questions or something you’d like us to prioritise, just
-      reply — we’re here to help your store grow.</p>
+      <p>We’ll begin with the foundations above this week — auditing your current pages,
+      fixing the technical basics, and rewriting titles and descriptions — and report back
+      on progress in your next update. If you have questions or something you’d like us to
+      prioritise, just reply; we’re here to help your store grow.</p>
+    </section>
+
+    <section class="card">
+      <h2>What’s coming next — your roadmap</h2>
+      <p>SEO compounds over time, so here’s where we’re taking ${storeName} over the
+      coming weeks:</p>
+      <ul class="roadmap">
+        <li><strong>Weeks 1–2 — Foundation.</strong> Technical clean-up, faster pages, and
+        sharper titles &amp; descriptions across your key pages.</li>
+        <li><strong>Weeks 3–4 — Content &amp; keywords.</strong> Expanding product and
+        collection pages around the exact phrases your buyers search, plus image alt text.</li>
+        <li><strong>Weeks 5–6 — Structure &amp; authority.</strong> Smarter internal linking
+        and ongoing tuning so your most important pages rank for more of the right terms.</li>
+        <li><strong>Ongoing — Measure &amp; grow.</strong> As the changes take hold, these
+        reports get richer with real numbers — search rankings, traffic, and the results
+        that turn into sales.</li>
+      </ul>
     </section>
 
     <footer>
@@ -327,14 +359,13 @@ async function main() {
       });
 
       console.log(
-        `  ✓ ${store.name.padEnd(20)} report → ${folderPath} › ${filename}` +
-        `  ${storeLogo ? '(logo embedded)' : '(no logo — name pill)'}` +
-        `${removed.count ? `  [replaced ${removed.count} old]` : ''}`,
+        `  ✓ ${store.name.padEnd(20)} report → ${filename}` +
+        `  ${storeLogo ? '(logo)' : '(name pill)'}` +
+        `${removed.count ? `  [replaced ${removed.count}]` : ''}`,
       );
     }
 
-    console.log('\nDone. Reports are visible under Resources › Branding Assets › <store> › Reports,');
-    console.log('and to each store owner via the brand-owner portal.');
+    console.log('\nDone. Reports are under Resources › Branding Assets › <store> › Reports.');
   } finally {
     await prisma.$disconnect();
   }

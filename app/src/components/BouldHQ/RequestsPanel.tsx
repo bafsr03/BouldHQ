@@ -428,6 +428,7 @@ const RequestDetail = ({
             <Button
               size="sm" variant="solid" color="primary"
               isLoading={busy === 'open_terminal'}
+              title="Open this store in Antigravity IDE and resume the agent's session (claude --continue)"
               onPress={() => action('open_terminal', () => api.storeRequest.openTerminal.mutate({ id: request.id }))}
               startContent={!busy && <Icon icon="tabler:terminal-2" width={14} height={14} />}
             >Connect</Button>

@@ -5,9 +5,7 @@ import { Button, Chip, Input, Skeleton } from '@heroui/react';
 import { Icon } from '@/components/Common/Iconify/icons';
 import { ScrollArea } from '@/components/Common/ScrollArea';
 import { api } from '@/lib/trpc';
-import { getBlinkoEndpoint } from '@/lib/blinkoEndpoint';
-import { RootStore } from '@/store';
-import { UserStore } from '@/store/user';
+import { StoreLogo } from '@/components/BouldHQ/StoreLogo';
 
 // /stores — team-scoped list of stores (every top-level tag in the active team).
 // One row per store; click to drill into ops at /stores/:tagId.
@@ -75,12 +73,6 @@ const StoresList = observer(() => {
     );
     return out;
   }, [rows, search, onlyOpen]);
-
-  const token = RootStore.Get(UserStore).tokenData.value?.token;
-  const logoUrlOf = (p: any) =>
-    p?.logoPath
-      ? getBlinkoEndpoint(`${p.logoPath}${token ? `?token=${encodeURIComponent(token)}` : ''}`)
-      : '';
 
   return (
     <ScrollArea fixMobileTopBar className="h-full bg-background">
@@ -172,11 +164,7 @@ const StoresList = observer(() => {
                 >
                   <div className="col-span-5 md:col-span-4 flex items-center gap-3 min-w-0">
                     <div className="size-9 rounded-md bg-default-200 flex items-center justify-center overflow-hidden shrink-0">
-                      {r.profile?.logoPath ? (
-                        <img src={logoUrlOf(r.profile)} alt="" className="size-full object-cover" />
-                      ) : (
-                        <Icon icon="tabler:building-store" width={18} height={18} className="text-default-500" />
-                      )}
+                      <StoreLogo logoPath={r.profile?.logoPath} alt={r.name} />
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
