@@ -23,6 +23,11 @@ export class BaseStore implements Store {
       icon: 'tabler:building-store',
     },
     {
+      title: 'growth',
+      href: '/growth',
+      icon: 'tabler:chart-arrows-vertical',
+    },
+    {
       title: 'blinko',
       href: '/',
       shallow: true,
@@ -183,6 +188,8 @@ export class BaseStore implements Store {
         this.currentTitle = 'todo';
       } else if (searchParams.get('path') == 'archived') {
         this.currentTitle = 'archived';
+      } else if (location.pathname == '/growth') {
+        this.currentTitle = 'growth';
       } else if (location.pathname == '/resources') {
         this.currentTitle = 'resources';
       } else if (searchParams.get('path') == 'trash') {

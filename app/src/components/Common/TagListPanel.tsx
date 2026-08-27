@@ -110,7 +110,9 @@ export const TagListPanel = observer(() => {
         const m: Record<number, string> = {};
         for (const p of profiles) {
           if (p.logoPath) {
-            m[p.tagId] = getBlinkoEndpoint(`${p.logoPath}${token ? `?token=${encodeURIComponent(token)}` : ''}`);
+            const qs = new URLSearchParams({ thumbnail: 'true' });
+            if (token) qs.set('token', token);
+            m[p.tagId] = getBlinkoEndpoint(`${p.logoPath}?${qs.toString()}`);
           }
         }
         setLogoMap(m);

@@ -98,6 +98,9 @@ router.post('/', async (req, res) => {
     let isUserVoiceRecording = false;
     let audioDuration: string | null = null;
     let audioDurationSeconds: number | null = null;
+    // Optional destination folder (resource perfixPath, comma- or slash-
+    // separated) — set when dropping files into a folder in Resources.
+    let folder: string | null = null;
 
     bb.on('field', (fieldname, value) => {
       if (fieldname === 'isUserVoiceRecording' && value === 'true') {
@@ -106,6 +109,8 @@ router.post('/', async (req, res) => {
         audioDuration = value;
       } else if (fieldname === 'audioDurationSeconds') {
         audioDurationSeconds = parseInt(value, 10);
+      } else if (fieldname === 'folder') {
+        folder = value;
       }
     });
 
@@ -170,7 +175,8 @@ router.post('/', async (req, res) => {
           fileSize: fileInfo.size,
           type: fileInfo.mimeType,
           accountId: Number(token.id),
-          metadata: Object.keys(metadata).length > 0 ? metadata : undefined
+          metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+          folder: folder || undefined
         });
         
         res.set({
@@ -190,8 +196,10 @@ router.post('/', async (req, res) => {
 
         // BouldHQ — fire-and-forget auto-route to a store's Branding Assets
         // folder when the filename mentions a team store (e.g. "JCK_logo.png").
+        // Skip it when the caller explicitly chose a folder (e.g. dropped into a
+        // Resources folder) — their destination wins.
         const uploadedPath = (filePath as any)?.filePath;
-        if (uploadedPath) {
+        if (uploadedPath && !folder) {
           autoRouteUploadByFilename(Number(token.id), uploadedPath, fileInfo.filename)
             .catch((err) => console.error('autoRouteUploadByFilename', err));
         }

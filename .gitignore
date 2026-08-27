@@ -36,3 +36,6 @@ server/public
 
 # BouldHQ per-store working directories (Phase 4 terminal)
 .bouldhq-workdirs/
+# BouldHQ — client work product (co-branded reports, exports). This repo is
+# public; nothing client-identifying belongs in it.
+/resources/

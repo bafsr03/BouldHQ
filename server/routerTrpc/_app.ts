@@ -29,6 +29,7 @@ import { teamRouter } from './team';
 import { storeRequestRouter } from './storeRequest';
 import { announcementRouter } from './announcement';
 import { brandOwnerRouter } from './brandOwner';
+import { growthRouter } from './growth';
 export const appRouter = router({
   ai: aiRouter,
   notes: noteRouter,
@@ -54,6 +55,7 @@ export const appRouter = router({
   storeRequest: storeRequestRouter,
   announcement: announcementRouter,
   brandOwner: brandOwnerRouter,
+  growth: growthRouter,
 });
 
 export const createCaller = t.createCallerFactory(appRouter);

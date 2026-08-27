@@ -7,11 +7,10 @@ import { Icon } from '@/components/Common/Iconify/icons';
 import { api } from '@/lib/trpc';
 
 // BouldHQ Phase 9 Ops Console.
-//   Connect = launches iTerm with two panes (claude + shopify theme dev) and
-//   opens the local preview URL after a short delay so the theme dev server
-//   has time to boot. If the workdir doesn't exist yet, prompts to import.
-//   Embedded "Quick shell" is collapsed by default — pipe-mode only, kept for
-//   small lookups (pwd, ls, tail a log).
+//   Connect = opens the theme folder in Antigravity IDE and auto-starts
+//   `claude` + `shopify theme dev` in its integrated terminals, then opens the
+//   local preview URL after a short delay so the dev server has time to boot.
+//   If the workdir doesn't exist yet, prompts to import.
 
 type ConnectInfo = {
   storeName: string;
@@ -21,6 +20,7 @@ type ConnectInfo = {
   themeSource: 'explicit' | 'theme_export' | 'workdir' | 'missing';
   previewUrl: string;
   storeUrl: string;
+  shopifyStore: string;
 };
 
 const THEME_SOURCE_LABEL: Record<ConnectInfo['themeSource'], string> = {
@@ -127,7 +127,7 @@ export function OpsConsole({ tagId, tagName }: { tagId: number; tagName: string 
               </div>
               <div>
                 <div className="text-default-500 uppercase tracking-wider text-[10px] mb-0.5">Shopify --store</div>
-                <div className="font-mono text-default-700 truncate">{info.storeUrl || <span className="text-default-400">not set — add it to the store profile</span>}</div>
+                <div className="font-mono text-default-700 truncate">{info.shopifyStore || <span className="text-default-400">not set — CLI will prompt</span>}</div>
               </div>
             </div>
             {!info.themeDirExists && (
@@ -143,7 +143,7 @@ export function OpsConsole({ tagId, tagName }: { tagId: number; tagName: string 
           </div>
         )}
         <p className="text-xs text-default-500 pt-1">
-          Connect opens iTerm with two panes (<code className="font-mono">claude</code> + <code className="font-mono">shopify theme dev</code>) cd'd into the theme folder, then opens the preview URL in a new tab after ~{Math.round(DEV_SERVER_BOOT_MS / 1000)}s.
+          Connect opens the theme folder in <strong>Antigravity IDE</strong> and auto-starts <code className="font-mono">claude</code> + <code className="font-mono">shopify theme dev</code> in its terminals, then opens the preview URL in a new tab after ~{Math.round(DEV_SERVER_BOOT_MS / 1000)}s. The first time you open a given store, Antigravity asks you to trust the folder and <em>Allow Automatic Tasks</em> — approve once and it's smooth after that.
         </p>
       </div>
 

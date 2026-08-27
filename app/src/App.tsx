@@ -47,6 +47,7 @@ const OwnerLoginPage = lazy(() => import('./pages/owner/login'));
 const OwnerDashboardPage = lazy(() => import('./pages/owner'));
 const AIPage = lazy(() => import('./pages/ai'));
 const ResourcesPage = lazy(() => import('./pages/resources'));
+const GrowthPage = lazy(() => import('./pages/growth'));
 const ReviewPage = lazy(() => import('./pages/review'));
 const SettingsPage = lazy(() => import('./pages/settings'));
 const PluginPage = lazy(() => import('./pages/plugin'));
@@ -256,6 +257,7 @@ function AppRoutes() {
             <Route path="/owner" element={<OwnerDashboardPage />} />
             <Route path="/stores/:tagId" element={<ProtectedRoute><StoreDetailPage /></ProtectedRoute>} />
             <Route path="/ai" element={<ProtectedRoute><AIPage /></ProtectedRoute>} />
+            <Route path="/growth" element={<ProtectedRoute><GrowthPage /></ProtectedRoute>} />
             <Route path="/resources" element={<ProtectedRoute><ResourcesPage /></ProtectedRoute>} />
             <Route path="/review" element={<ProtectedRoute><ReviewPage /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />

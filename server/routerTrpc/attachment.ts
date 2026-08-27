@@ -1,4 +1,4 @@
-import { router, authProcedure } from '../middleware';
+import { router, authProcedure, managerProcedure } from '../middleware';
 import { z } from 'zod';
 import { prisma } from '../prisma';
 import { Prisma } from '@prisma/client';
@@ -511,5 +511,48 @@ export const attachmentsRouter = router({
         }
       });
       return { success: true, message: 'Files deleted successfully' };
+    }),
+
+  // Overwrite the content of an existing text/HTML resource file (e.g. a weekly
+  // report) from the in-app editor. Manager-or-founder on the active team only.
+  updateContent: managerProcedure
+    .input(z.object({
+      path: z.string(),       // the attachment's /api/file/... path
+      content: z.string(),    // new UTF-8 text content
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const attachment = await prisma.attachments.findFirst({
+        where: { path: input.path },
+        select: { id: true, accountId: true, type: true, name: true },
+      });
+      if (!attachment) throw new Error('File not found');
+
+      // Only text/HTML files are editable.
+      const isText =
+        (attachment.type || '').startsWith('text/') ||
+        /\.(html?|md|markdown|txt|csv|json)$/i.test(attachment.name || '');
+      if (!isText) throw new Error('Only text files can be edited');
+
+      // Authorize: the caller owns the file, OR it's their team's resource
+      // (owned by the team's first founder — same stability rule the report
+      // generator uses), OR they're a superadmin.
+      const teamFounder = await prisma.teamMember.findFirst({
+        where: { teamId: ctx.teamId, role: 'founder' },
+        orderBy: { id: 'asc' },
+        select: { accountId: true },
+      });
+      const allowed =
+        attachment.accountId === Number(ctx.id) ||
+        (teamFounder != null && attachment.accountId === teamFounder.accountId) ||
+        ctx.role === 'superadmin';
+      if (!allowed) throw new Error('You do not have access to edit this file');
+
+      const buffer = Buffer.from(input.content, 'utf-8');
+      const size = await FileService.updateFileContent(input.path, buffer);
+      await prisma.attachments.update({
+        where: { id: attachment.id },
+        data: { size },
+      });
+      return { success: true, size };
     }),
 });
