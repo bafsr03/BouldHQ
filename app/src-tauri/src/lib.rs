@@ -4,6 +4,24 @@ mod desktop;
 use desktop::*;
 use tauri::Manager;
 
+/// Bring the main window back into view. Used from both paths that can ask for
+/// the app after its window was hidden: a second launch (single-instance) and,
+/// on macOS, a Dock click on the already-running app (RunEvent::Reopen).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(window) = app.get_webview_window("main") {
+        if let Err(e) = window.show() {
+            eprintln!("Failed to show window: {}", e);
+        }
+        if let Err(e) = window.unminimize() {
+            eprintln!("Failed to unminimize window: {}", e);
+        }
+        if let Err(e) = window.set_focus() {
+            eprintln!("Failed to focus window: {}", e);
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default()
@@ -24,24 +42,7 @@ pub fn run() {
                 println!("Second instance detected with args: {:?} and cwd: {:?}", args, cwd);
 
                 // Show and focus the existing window
-                if let Some(window) = app.get_webview_window("main") {
-                    // Show window if it's hidden
-                    if let Err(e) = window.show() {
-                        eprintln!("Failed to show window: {}", e);
-                    }
-
-                    // Unminimize if minimized
-                    if let Err(e) = window.unminimize() {
-                        eprintln!("Failed to unminimize window: {}", e);
-                    }
-
-                    // Bring to front and focus
-                    if let Err(e) = window.set_focus() {
-                        eprintln!("Failed to focus window: {}", e);
-                    }
-
-                    println!("Focused existing Blinko window");
-                }
+                show_main_window(app);
             }))
             .plugin(tauri_plugin_updater::Builder::new().build())
             .plugin(
@@ -88,8 +89,21 @@ pub fn run() {
                 setup_app(app)?;
                 Ok(())
             })
-            .run(tauri::generate_context!())
-            .expect("error while running tauri application");
+            .build(tauri::generate_context!())
+            .expect("error while building tauri application")
+            .run(|app, event| {
+                // Closing the window only hides it (see desktop::window and
+                // desktop::setup — both prevent_close then hide), so the app
+                // keeps running with no visible window. On macOS, clicking the
+                // Dock icon of a *running* app doesn't spawn a second process,
+                // so the single-instance callback above never fires and the
+                // click was silently doing nothing. macOS sends Reopen instead.
+                #[cfg(target_os = "macos")]
+                if let tauri::RunEvent::Reopen { .. } = event {
+                    show_main_window(app);
+                }
+                let _ = (app, event);
+            });
     }
 
     #[cfg(any(target_os = "android", target_os = "ios"))]
