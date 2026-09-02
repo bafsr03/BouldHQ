@@ -22,6 +22,7 @@ import { DialogStandaloneStore } from '@/store/module/DialogStandalone';
 import { ToastPlugin } from '@/store/module/Toast/Toast';
 import { BarSearchInput } from './BarSearchInput';
 import { BlinkoNotification } from '@/components/BlinkoNotification';
+import { UpdateButton } from '@/components/Common/UpdateButton';
 import { AiStore } from '@/store/aiStore';
 import { useLocation, useSearchParams, Link } from 'react-router-dom';
 
@@ -201,6 +202,7 @@ export const CommonLayout = observer(({ children, header }: { children?: React.R
                     </Button>
                   </Link>
                 </Badge>}
+                <UpdateButton />
                 <BlinkoNotification />
               </div>
             </div>
