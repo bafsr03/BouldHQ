@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import { useLocation, useSearchParams, Link, useNavigate } from 'react-router-dom';
 import { eventBus } from '@/lib/event';
 import { useIsFounder } from '@/lib/useTeamRole';
+import { UpdateButton } from '../Common/UpdateButton';
 
 interface SidebarProps {
   onItemClick?: () => void;
@@ -113,6 +114,10 @@ export const Sidebar = observer(({ onItemClick }: SidebarProps) => {
             ))}
         </div>
       </ScrollShadow>
+
+      {/* Sits below the nav list, after archived — visible without scrolling
+          because it's outside the ScrollShadow. */}
+      <UpdateButton />
 
       {/* ***** background *****  */}
       <div className="halation absolute inset-0 h-[250px] w-[250px] overflow-hidden blur-3xl z-[0] pointer-events-none">
