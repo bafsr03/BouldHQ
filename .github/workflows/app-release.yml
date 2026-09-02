@@ -240,7 +240,7 @@ jobs:
           tauriScript: 'bun run tauri'
           args: ${{ matrix.args }}
           tagName: ${{ github.event.inputs.is-test == 'true' && '' || needs.set-version.outputs.version }}
-          releaseName: ${{ github.event.inputs.is-test == 'true' && '' || format('Blinko {0}', needs.set-version.outputs.version) }}
+          releaseName: ${{ github.event.inputs.is-test == 'true' && '' || format('BouldHQ {0}', needs.set-version.outputs.version) }}
           releaseBody: ${{ github.event.inputs.is-test == 'true' && '' || 'Under construction, full changelog will be updated after build completion...' }}
           releaseDraft: ${{ github.event.inputs.is-test == 'true' }}
           prerelease: ${{ github.event.inputs.is-test == 'true' }}
