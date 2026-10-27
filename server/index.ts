@@ -40,6 +40,7 @@ import brandOwnerAuthRouter from './routerExpress/brandOwner';
 
 // Vite integration
 import ViteExpress from 'vite-express';
+import { prisma } from './prisma';
 
 // Process error handling
 process.on('uncaughtException', (error) => {
@@ -278,10 +279,29 @@ async function setupApiRoutes(app: express.Application) {
 }
 
 /**
+ * Block until Postgres accepts queries. At login the backend can launch before
+ * the database is up; route setup reads the JWT secret from the DB, and if that
+ * fails the fallback below serves only the SPA — every /api call returns HTML.
+ */
+async function waitForDatabase() {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      return;
+    } catch (err: any) {
+      const delay = Math.min(attempt * 1000, 10_000);
+      console.warn(`database not ready (attempt ${attempt}), retrying in ${delay}ms: ${err?.message?.split('\n').pop()}`);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+}
+
+/**
  * Bootstrap the server
  * Sets up middleware, auth, API routes and starts the server
  */
 async function bootstrap() {
+  await waitForDatabase();
   try {
     app.use(cors({
       origin: true,
