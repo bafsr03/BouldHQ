@@ -1,7 +1,7 @@
 import { observer } from 'mobx-react-lite';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Button, Chip, Input, Skeleton } from '@heroui/react';
+import { Button, Chip, Input, Select, SelectItem, Skeleton } from '@heroui/react';
 import { Icon } from '@/components/Common/Iconify/icons';
 import { ScrollArea } from '@/components/Common/ScrollArea';
 import { api } from '@/lib/trpc';
@@ -10,18 +10,29 @@ import { StoreLogo } from '@/components/BouldHQ/StoreLogo';
 // /stores — team-scoped list of stores (every top-level tag in the active team).
 // One row per store; click to drill into ops at /stores/:tagId.
 
+const SORTS = {
+  newest: 'Newest first',
+  oldest: 'Oldest first',
+  name: 'Name (A–Z)',
+  open: 'Open requests',
+} as const;
+type SortKey = keyof typeof SORTS;
+
 type StoreRow = {
   tagId: number;
   name: string;
   profile: any;
   openRequests: number;
   archivedAt: string | null;
+  createdAt: number;
 };
 
 const StoresList = observer(() => {
   const [searchParams, setSearchParams] = useSearchParams();
   const onlyOpen = searchParams.get('filter') === 'open';
   const showArchived = searchParams.get('archived') === '1';
+  const sortParam = searchParams.get('sort') as SortKey | null;
+  const sort: SortKey = sortParam && sortParam in SORTS ? sortParam : 'newest';
   const [rows, setRows] = useState<StoreRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -45,14 +56,8 @@ const StoresList = observer(() => {
           profile: p,
           openRequests: openByTagId.get(p.tagId) ?? 0,
           archivedAt: p.archivedAt ? new Date(p.archivedAt).toISOString() : null,
+          createdAt: p.createdAt ? new Date(p.createdAt).getTime() : 0,
         }));
-        // Active first; within each group, open-requests then alpha.
-        next.sort((a, b) => {
-          const aArch = a.archivedAt ? 1 : 0;
-          const bArch = b.archivedAt ? 1 : 0;
-          if (aArch !== bArch) return aArch - bArch;
-          return b.openRequests - a.openRequests || a.name.localeCompare(b.name);
-        });
         setRows(next);
       } catch (err) {
         console.error('stores load error', err);
@@ -71,8 +76,20 @@ const StoresList = observer(() => {
       r.name.toLowerCase().includes(q) ||
       (r.profile?.storeUrl ?? '').toLowerCase().includes(q),
     );
-    return out;
-  }, [rows, search, onlyOpen]);
+    // Archived always sink to the bottom; the chosen sort orders within each group.
+    return [...out].sort((a, b) => {
+      const aArch = a.archivedAt ? 1 : 0;
+      const bArch = b.archivedAt ? 1 : 0;
+      if (aArch !== bArch) return aArch - bArch;
+      const byName = a.name.localeCompare(b.name);
+      switch (sort) {
+        case 'oldest': return a.createdAt - b.createdAt || byName;
+        case 'name': return byName;
+        case 'open': return b.openRequests - a.openRequests || byName;
+        default: return b.createdAt - a.createdAt || byName;
+      }
+    });
+  }, [rows, search, onlyOpen, sort]);
 
   return (
     <ScrollArea fixMobileTopBar className="h-full bg-background">
@@ -108,6 +125,25 @@ const StoresList = observer(() => {
               startContent={<Icon icon="tabler:search" width={16} height={16} className="text-default-400" />}
               className="md:w-72"
             />
+            <Select
+              size="sm"
+              aria-label="Sort stores"
+              className="w-44"
+              disallowEmptySelection
+              selectedKeys={[sort]}
+              onSelectionChange={(keys) => {
+                const v = Array.from(keys)[0] as SortKey;
+                if (!v) return;
+                if (v === 'newest') searchParams.delete('sort');
+                else searchParams.set('sort', v);
+                setSearchParams(searchParams, { replace: true });
+              }}
+              startContent={<Icon icon="tabler:arrows-sort" width={16} height={16} className="text-default-400" />}
+            >
+              {(Object.keys(SORTS) as SortKey[]).map((k) => (
+                <SelectItem key={k}>{SORTS[k]}</SelectItem>
+              ))}
+            </Select>
             <button
               type="button"
               onClick={() => {
